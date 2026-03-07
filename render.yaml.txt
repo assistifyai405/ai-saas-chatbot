@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: ai-saas
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn ai:app
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_STARTER
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: DB_PATH
+        sync: false
