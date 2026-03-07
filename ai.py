@@ -528,40 +528,51 @@ LOGIN_HTML = """
 
 PRICING_HTML = """
 <!DOCTYPE html>
-<html lang="nl">
+<html lang='nl'>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
 <title>Pricing</title>
 <style>{{ css }}</style>
 </head>
-<body>
-<div class="wrap">
-    <div class="card">
-        <h1>Pricing</h1>
-        <p>Met Stripe auto-onboarding. Na betaling wordt de shop automatisch aangemaakt via webhook.</p>
-        <a class="btn" href="/">Home</a>
-    </div>
 
-    <div class="grid3">
-        <div class="card">
-            <h2>Starter</h2>
-            <p>€39 / maand</p>
-            <p>1 shop, AI chat, leads, widget</p>
-            <a class="btn" href="/signup">Start nu</a>
-        </div>
-        <div class="card">
-            <h2>Pro</h2>
-            <p>€79 / maand</p>
-            <p>Meer support en grotere setup</p>
-        </div>
-        <div class="card">
-            <h2>Agency</h2>
-            <p>€199 / maand</p>
-            <p>Meerdere merken / shops</p>
-        </div>
-    </div>
+<body>
+
+<div class='wrap'>
+
+<div class='card'>
+<h1>Pricing</h1>
+<p>Kies een plan en laat automatisch een shop + client account aanmaken.</p>
+<a class='btn' href='/'>Home</a>
 </div>
+
+<div class='grid3'>
+
+<div class='card'>
+<h2>Starter</h2>
+<p>€39 / maand</p>
+<p>1 shop, AI chat, leads, widget</p>
+<a class='btn' href='/signup?plan=starter'>Start nu</a>
+</div>
+
+<div class='card'>
+<h2>Pro</h2>
+<p>€79 / maand</p>
+<p>Meer support en grotere setup</p>
+<a class='btn' href='/signup?plan=pro'>Kies Pro</a>
+</div>
+
+<div class='card'>
+<h2>Agency</h2>
+<p>€199 / maand</p>
+<p>Meerdere merken / shops</p>
+<a class='btn' href='/signup?plan=agency'>Kies Agency</a>
+</div>
+
+</div>
+
+</div>
+
 </body>
 </html>
 """
@@ -1320,4 +1331,5 @@ def client_lead_status(lead_id):
 # =========================
 if __name__ == "__main__":
     init_db()
+
     app.run(debug=True, host="0.0.0.0", port=PORT)
