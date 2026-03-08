@@ -463,231 +463,100 @@ input, textarea, select { width:100%; padding:12px; margin:8px 0 14px 0; border:
 @media (max-width: 900px) { .grid2, .grid3 { grid-template-columns:1fr; } }
 """
 
-HOME_HTML = <style>
-
-body{
-margin:0;
-font-family:Inter,Arial,Helvetica,sans-serif;
-background:#f9fafb;
-color:#111;
-}
-
-.container{
-max-width:1200px;
-margin:auto;
-padding:40px 20px;
-}
-
-.hero{
-padding:120px 20px;
-text-align:center;
-background:white;
-border-bottom:1px solid #eee;
-}
-
-.hero h1{
-font-size:56px;
-margin-bottom:20px;
-}
-
-.hero p{
-font-size:20px;
-color:#6b7280;
-max-width:700px;
-margin:auto;
-}
-
-.cta{
-margin-top:40px;
-}
-
-.btn{
-padding:16px 30px;
-border-radius:12px;
-text-decoration:none;
-font-weight:bold;
-margin:10px;
-display:inline-block;
-}
-
-.btn-primary{
-background:#6366f1;
-color:white;
-}
-
-.btn-dark{
-background:#111827;
-color:white;
-}
-
-.features{
-padding:80px 20px;
-background:#f3f4f6;
-}
-
-.feature-grid{
-display:grid;
-grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-gap:30px;
-max-width:1100px;
-margin:auto;
-}
-
-.feature{
-background:white;
-padding:30px;
-border-radius:16px;
-box-shadow:0 10px 25px rgba(0,0,0,0.05);
-}
-
-.feature h3{
-margin-top:10px;
-}
-
-.shops{
-padding:80px 20px;
-max-width:900px;
-margin:auto;
-}
-
-.shop{
-padding:15px 0;
-border-bottom:1px solid #eee;
-}
-
-</style>
-
-
-
-<div class="hero">
-
-<h1>Assistify AI</h1>
-
-<p>AI klantenservice chatbot voor websites. Automatiseer support, genereer leads en verkoop meer met AI.</p>
-
-<div class="cta">
-
-<a class="btn btn-primary" href="/shop/demo-shop">
-Bekijk demo
-</a>
-
-<a class="btn btn-dark" href="/pricing">
-Bekijk prijzen
-</a>
-
-</div>
-
-</div>
-
-
-
-<div class="features">
-
-<div class="feature-grid">
-
-<div class="feature">
-<h3>AI Chatbot</h3>
-<p>Automatische klantenservice die vragen van bezoekers direct beantwoordt.</p>
-</div>
-
-<div class="feature">
-<h3>Lead generatie</h3>
-<p>De AI verzamelt automatisch leads uit gesprekken met bezoekers.</p>
-</div>
-
-<div class="feature">
-<h3>Stripe abonnementen</h3>
-<p>Verkoop abonnementen via Stripe met automatische onboarding.</p>
-</div>
-
-<div class="feature">
-<h3>Website training</h3>
-<p>Train de AI op elke website zodat hij vragen correct kan beantwoorden.</p>
-</div>
-
-</div>
-
-</div>
-
-
-
-<div class="shops">
-
-<h2>Actieve shops</h2>
-
-{% for shop in shops %}
-
-<div class="shop">
-
-<strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }}
-
-<br>
-
-<a href="/shop/{{ shop['slug'] }}">Open shop</a>
-
-</div>
-
-{% endfor %}
-
-</div>
+HOME_HTML = """
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ title }}</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #e5e7eb;
-    color: #0f172a;
-  }
-  .wrap {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 40px 20px;
-  }
-  .card {
-    background: #ffffff;
-    border-radius: 28px;
-    padding: 36px;
-    margin-bottom: 30px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-  }
-  .btn {
-    display: inline-block;
-    padding: 14px 22px;
-    border-radius: 16px;
-    background: #0f172a;
-    color: white;
-    text-decoration: none;
-    font-weight: 700;
-    margin-right: 10px;
-  }
-  .item {
-    padding: 12px 0;
-    border-top: 1px solid #e5e7eb;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assistify AI</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+    }
+    .container {
+      max-width: 1200px;
+      margin: auto;
+      padding: 40px 20px;
+    }
+    .hero {
+      background: white;
+      padding: 60px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      margin-bottom: 40px;
+    }
+    .hero h1 {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+    .hero p {
+      font-size: 18px;
+      color: #6b7280;
+    }
+    .buttons {
+      margin-top: 25px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 14px 26px;
+      background: #111827;
+      color: white;
+      border-radius: 12px;
+      text-decoration: none;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    .btn.secondary {
+      background: #6366f1;
+    }
+    .section {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+    }
+    .shop {
+      padding: 14px 0;
+      border-bottom: 1px solid #eee;
+    }
+  </style>
 </head>
 <body>
-<div class="center">
-    <div class="box">
-        <h2>{{ title }}</h2>
-        {% if error %}<div class="error">{{ error }}</div>{% endif %}
-        <form method="POST">
-            <input type="text" name="email_or_username" placeholder="{{ user_label }}" required>
-            <input type="password" name="password" placeholder="Wachtwoord" required>
-            <button class="btn" type="submit" style="width:100%;">Inloggen</button>
-        </form>
+  <div class="container">
+    <div class="hero">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="45" alt="Assistify AI logo">
+        <h1>Assistify AI</h1>
+      </div>
+
+      <p>AI klantenservice chatbot voor websites</p>
+      <p>Automatische klantenservice • Stripe abonnementen • Dashboard • AI chatbot widget</p>
+
+      <div class="buttons">
+        <a class="btn" href="/shop/demo-shop">Open Demo Shop</a>
+        <a class="btn secondary" href="/pricing">Bekijk prijzen</a>
+        <a class="btn" href="/admin/login">Admin login</a>
+        <a class="btn" href="/client/login">Client login</a>
+      </div>
     </div>
-</div>
+
+    <div class="section">
+      <h2>Actieve shops</h2>
+      {% for shop in shops %}
+      <div class="shop">
+        <strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }}<br>
+        <a href="/shop/{{ shop['slug'] }}">Open shop</a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
 </body>
 </html>
 """
-
 PRICING_HTML = """
 <!DOCTYPE html>
 <html lang='nl'>
@@ -1495,6 +1364,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
