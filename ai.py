@@ -477,9 +477,7 @@ HOME_HTML = """
     <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="40" alt="Assistify AI logo">
   <div class="wrap">
   <div class="card">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-      <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="40" height="40" alt="Assistify AI logo">
-      <h1 style="margin:0;">Assistify AI</h1>
+    
     </div>
 
     <p style="margin-top:12px;">AI klantenservice voor websites</p>
@@ -533,10 +531,40 @@ LOGIN_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ title }}</title>
-<style>{{ css }}
-.center { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
-.box { width:100%; max-width:420px; background:white; border-radius:18px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,0.08); }
-.error { color:#b91c1c; margin-bottom:10px; }
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #e5e7eb;
+    color: #0f172a;
+  }
+  .wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 20px;
+  }
+  .card {
+    background: #ffffff;
+    border-radius: 28px;
+    padding: 36px;
+    margin-bottom: 30px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .btn {
+    display: inline-block;
+    padding: 14px 22px;
+    border-radius: 16px;
+    background: #0f172a;
+    color: white;
+    text-decoration: none;
+    font-weight: 700;
+    margin-right: 10px;
+  }
+  .item {
+    padding: 12px 0;
+    border-top: 1px solid #e5e7eb;
+  }
 </style>
 </head>
 <body>
@@ -1362,6 +1390,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
