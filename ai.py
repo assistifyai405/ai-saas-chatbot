@@ -464,20 +464,11 @@ input, textarea, select { width:100%; padding:12px; margin:8px 0 14px 0; border:
 """
 
 HOME_HTML = """
-<!DOCTYPE html>
-<html lang="nl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <div class="wrap">
-    <div class="card">
-        <div class="card">
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="40" alt="Assistify AI logo">
-  <div class="wrap">
   <div class="card">
-    
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="40" height="40" alt="Assistify AI logo">
+      <h1 style="margin:0;">Assistify AI</h1>
     </div>
 
     <p style="margin-top:12px;">AI klantenservice voor websites</p>
@@ -487,6 +478,18 @@ HOME_HTML = """
     <a class="btn" href="/admin/login">Admin login</a>
     <a class="btn" href="/client/login">Client login</a>
     <a class="btn" href="/pricing">Pricing</a>
+  </div>
+
+  <div class="card">
+    <h2>Actieve shops</h2>
+    {% for shop in shops %}
+      <div class="item">
+        <strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }}<br>
+        <a href="/shop/{{ shop['slug'] }}">Open shop</a>
+      </div>
+    {% endfor %}
+  </div>
+</div>
   </div>
 
   <div class="card">
@@ -1390,6 +1393,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
