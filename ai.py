@@ -487,7 +487,7 @@ HOME_HTML = """
   <a class="btn" href="/pricing">Pricing</a>
 </div>
 <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="40">
-<h1>Assistify AI</h1>
+
 </div>
         <p>Deployment + Stripe auto-onboarding + client dashboard + widget.</p>
         <a class="btn" href="/shop/demo-shop">Open demo shop</a>
@@ -1346,6 +1346,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
