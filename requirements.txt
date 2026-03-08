@@ -3,4 +3,5 @@ python-dotenv
 openai
 werkzeug
 stripe
+flask-cors
 gunicorn
