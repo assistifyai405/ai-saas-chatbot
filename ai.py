@@ -12,7 +12,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, Response, session
+ffrom flask import Flask, request, jsonify, Response, session, redirect
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
@@ -1765,8 +1765,7 @@ def add_security_headers(response):
 # =========================
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"ok": True, "version": APP_VERSION, "message": "AI SaaS backend draait.", "database": DB_PATH})
-
+    return redirect("/signup")
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -2639,3 +2638,4 @@ ensure_startup()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=False)
+
