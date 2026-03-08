@@ -12,7 +12,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
-ffrom flask import Flask, request, jsonify, Response, session, redirect
+from flask import Flask, request, jsonify, Response, session, redirect
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
@@ -2638,4 +2638,5 @@ ensure_startup()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=False)
+
 
