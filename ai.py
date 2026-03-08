@@ -1779,6 +1779,16 @@ if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=PORT)
 
 
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    data = request.json
+    message = data.get("message")
+
+    reply = ask_ai(message)  # jouw AI functie
+
+    return jsonify({
+        "reply": reply
+    })
 
 
 
