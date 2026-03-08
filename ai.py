@@ -1354,7 +1354,19 @@ def success():
 
     conn.close()
     return render_template_string(SUCCESS_HTML, css=BASE_CSS, ready=ready, slug=slug)
+def get_all_shops():
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
 
+    try:
+        cur.execute("SELECT name, slug FROM shops")
+        shops = cur.fetchall()
+    except:
+        shops = []
+
+    conn.close()
+    return shops
 @app.route("/shop/<slug>")
 def shop_page(slug):
     shop = get_shop_by_slug(slug)
@@ -1765,6 +1777,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
