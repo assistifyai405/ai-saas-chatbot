@@ -6,13 +6,15 @@ import hmac
 import secrets
 import sqlite3
 import smtplib
+import csv
+import io
 from datetime import timedelta
 from contextlib import closing
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, Response, session, redirect
+from flask import Flask, request, jsonify, Response, session
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
@@ -27,7 +29,7 @@ except Exception:
 # =========================
 # CONFIG
 # =========================
-APP_VERSION = "v21.0"
+APP_VERSION = "v22.0"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
@@ -79,7 +81,7 @@ DEFAULT_FAQ_CONTEXT = os.getenv(
 - Bij complexe problemen moet de klant naam, e-mail en probleemomschrijving achterlaten.
 """.strip()
 )
-DEFAULT_WIDGET_COLOR = os.getenv("DEFAULT_WIDGET_COLOR", "#111111").strip()
+DEFAULT_WIDGET_COLOR = os.getenv("DEFAULT_WIDGET_COLOR", "#6d5efc").strip()
 DEFAULT_TENANT_API_KEY = os.getenv("DEFAULT_TENANT_API_KEY", "default-demo-key").strip()
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip()
@@ -149,16 +151,6 @@ def get_db():
     return conn
 
 
-def column_exists(conn, table_name: str, column_name: str) -> bool:
-    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return any(row["name"] == column_name for row in rows)
-
-
-def ensure_column(conn, table_name: str, column_name: str, definition: str):
-    if not column_exists(conn, table_name, column_name):
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
-
-
 def init_db():
     with closing(get_db()) as conn:
         cur = conn.cursor()
@@ -182,7 +174,7 @@ def init_db():
             stripe_subscription_id TEXT DEFAULT '',
             billing_email TEXT DEFAULT '',
             billing_cycle TEXT DEFAULT 'monthly',
-            widget_color TEXT NOT NULL DEFAULT '#111111',
+            widget_color TEXT NOT NULL DEFAULT '#6d5efc',
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at INTEGER NOT NULL
         )
@@ -236,19 +228,6 @@ def init_db():
             event_type TEXT NOT NULL,
             month_key TEXT NOT NULL,
             meta_json TEXT,
-            created_at INTEGER NOT NULL,
-            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
-        )
-        """)
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS billing_events (
-            id TEXT PRIMARY KEY,
-            tenant_id TEXT,
-            provider TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            external_event_id TEXT DEFAULT '',
-            payload_json TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
         )
@@ -315,18 +294,12 @@ def init_db():
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer_id ON tenants(stripe_customer_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_customer_users_tenant_id ON customer_users(tenant_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_customer_users_email ON customer_users(email)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_tenant_id ON messages(tenant_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_usage_tenant_id ON usage_events(tenant_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_onboarding_tokens_token ON onboarding_tokens(token)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_tokens_token ON invite_tokens(token)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_leads_tenant_id ON leads(tenant_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)")
-
         conn.commit()
 
 
@@ -372,7 +345,6 @@ def seed_default_tenant():
             )
         )
 
-        user_id = str(uuid.uuid4())
         conn.execute(
             """
             INSERT INTO customer_users (
@@ -381,7 +353,7 @@ def seed_default_tenant():
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                user_id,
+                str(uuid.uuid4()),
                 tenant_id,
                 DEFAULT_SUPPORT_EMAIL,
                 generate_password_hash("changeme123"),
@@ -580,16 +552,7 @@ Als jij dit niet was, kun je dit bericht negeren.
     return send_email(to_email, subject, body)
 
 
-def create_audit_log(
-    tenant_id,
-    actor_type: str,
-    actor_id: str,
-    action: str,
-    target_type: str,
-    target_id: str = "",
-    meta=None,
-    ip_address: str = ""
-):
+def create_audit_log(tenant_id, actor_type: str, actor_id: str, action: str, target_type: str, target_id: str = "", meta=None, ip_address: str = ""):
     with closing(get_db()) as conn:
         conn.execute(
             """
@@ -620,26 +583,28 @@ def list_audit_logs(tenant_id=None, limit: int = 100):
     with closing(get_db()) as conn:
         if tenant_id:
             rows = conn.execute(
-                """
-                SELECT *
-                FROM audit_logs
-                WHERE tenant_id = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
+                "SELECT * FROM audit_logs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
                 (tenant_id, safe_limit)
             ).fetchall()
         else:
             rows = conn.execute(
-                """
-                SELECT *
-                FROM audit_logs
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
+                "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?",
                 (safe_limit,)
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+def make_csv_response(filename: str, rows: list, fieldnames: list) -> Response:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({k: row.get(k, "") for k in fieldnames})
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 def get_tenant_by_api_key(api_key: str):
@@ -1204,6 +1169,17 @@ def update_tenant_settings(tenant_id: str, data: dict):
     return get_tenant_by_id(tenant_id), None
 
 
+def rotate_tenant_api_key(tenant_id: str):
+    tenant = get_tenant_by_id(tenant_id)
+    if not tenant:
+        return None
+    new_key = generate_api_key()
+    with closing(get_db()) as conn:
+        conn.execute("UPDATE tenants SET api_key = ? WHERE id = ?", (new_key, tenant_id))
+        conn.commit()
+    return get_tenant_by_id(tenant_id)
+
+
 def require_admin() -> bool:
     return bool(session.get("admin_logged_in"))
 
@@ -1220,9 +1196,9 @@ def customer_forbidden():
     return jsonify({"ok": False, "error": "Niet geautoriseerd."}), 401
 
 # =========================
-# HTML HELPERS
+# HTML
 # =========================
-def render_simple_page(title: str, body: str) -> str:
+def render_shell(title: str, body: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -1230,179 +1206,305 @@ def render_simple_page(title: str, body: str) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>{title}</title>
 <style>
-body {{ margin:0; font-family:Arial,sans-serif; background:#0f172a; color:#fff; }}
-.wrap {{ max-width:1100px; margin:0 auto; padding:32px 20px; }}
-.card {{ background:#111827; border:1px solid #1f2937; border-radius:16px; padding:20px; margin-bottom:16px; }}
-input, textarea, button {{ width:100%; padding:12px; border-radius:10px; border:1px solid #374151; background:#0b1220; color:#fff; margin-bottom:12px; }}
-button {{ background:#2563eb; border:none; font-weight:700; cursor:pointer; }}
-button.secondary {{ background:#374151; }}
-pre {{ background:#020617; padding:12px; border-radius:12px; white-space:pre-wrap; word-break:break-word; overflow:auto; }}
-.grid {{ display:grid; gap:16px; }}
-.grid-2 {{ grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }}
-.grid-4 {{ grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }}
-.muted {{ color:#9ca3af; }}
-.stats {{ font-size:24px; font-weight:800; }}
-table {{ width:100%; border-collapse:collapse; }}
-th, td {{ padding:10px; text-align:left; border-bottom:1px solid #1f2937; vertical-align:top; }}
-a {{ color:#60a5fa; }}
+:root {{
+  --bg:#07101f;
+  --bg2:#0b1224;
+  --panel:rgba(16,24,40,.78);
+  --panel-2:rgba(19,28,47,.92);
+  --line:rgba(255,255,255,.08);
+  --text:#f8fafc;
+  --muted:#a5b4cf;
+  --primary:#6d5efc;
+  --primary-2:#8b7cff;
+  --success:#1ec98f;
+  --danger:#ff6b81;
+  --shadow:0 24px 80px rgba(0,0,0,.35);
+  --radius:24px;
+}}
+* {{ box-sizing:border-box; }}
+html, body {{ margin:0; padding:0; }}
+body {{
+  font-family:Inter, Arial, sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(109,94,252,.28), transparent 28%),
+    radial-gradient(circle at top right, rgba(30,201,143,.14), transparent 24%),
+    linear-gradient(180deg, #08101f 0%, #091223 100%);
+  min-height:100vh;
+}}
+a {{ color:#9bb2ff; text-decoration:none; }}
+.wrap {{ max-width:1220px; margin:0 auto; padding:28px 18px 60px; }}
+.topnav {{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin-bottom:22px; padding:16px 18px; border:1px solid var(--line);
+  background:rgba(255,255,255,.03); border-radius:20px; backdrop-filter: blur(12px);
+}}
+.brand {{
+  display:flex; align-items:center; gap:12px; font-weight:800; letter-spacing:.2px;
+}}
+.brand-badge {{
+  width:42px; height:42px; border-radius:14px;
+  background:linear-gradient(135deg, var(--primary), var(--primary-2));
+  display:flex; align-items:center; justify-content:center; font-size:18px;
+  box-shadow:0 12px 28px rgba(109,94,252,.35);
+}}
+.nav-actions {{ display:flex; gap:10px; flex-wrap:wrap; }}
+.hero {{
+  padding:28px; border-radius:30px; background:
+  linear-gradient(135deg, rgba(109,94,252,.18), rgba(255,255,255,.03));
+  border:1px solid var(--line); box-shadow:var(--shadow); margin-bottom:18px;
+}}
+.grid {{ display:grid; gap:18px; }}
+.grid-2 {{ grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }}
+.grid-3 {{ grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }}
+.grid-4 {{ grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }}
+.card {{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:20px;
+  box-shadow:var(--shadow);
+  backdrop-filter: blur(14px);
+}}
+.card-soft {{
+  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+}}
+h1, h2, h3 {{ margin:0 0 10px; line-height:1.08; }}
+h1 {{ font-size:clamp(34px, 5vw, 60px); }}
+h2 {{ font-size:26px; }}
+h3 {{ font-size:18px; }}
+p {{ margin:0 0 12px; }}
+.muted {{ color:var(--muted); }}
+.stats {{
+  font-size:30px; font-weight:800; letter-spacing:-0.02em;
+}}
+.kicker {{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 12px; border-radius:999px; background:rgba(109,94,252,.14);
+  color:#d9d4ff; border:1px solid rgba(139,124,255,.22); font-size:13px; margin-bottom:14px;
+}}
+input, textarea, select, button {{
+  width:100%;
+  padding:14px 16px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(7,16,31,.75);
+  color:#fff;
+  font-size:15px;
+  outline:none;
+}}
+input:focus, textarea:focus, select:focus {{
+  border-color:rgba(139,124,255,.72);
+  box-shadow:0 0 0 4px rgba(109,94,252,.12);
+}}
+textarea {{ min-height:120px; resize:vertical; }}
+button {{
+  border:none;
+  cursor:pointer;
+  font-weight:800;
+  background:linear-gradient(135deg, var(--primary), var(--primary-2));
+  box-shadow:0 14px 32px rgba(109,94,252,.28);
+  transition:transform .12s ease, opacity .12s ease;
+}}
+button:hover {{ transform:translateY(-1px); }}
+button.secondary {{
+  background:rgba(255,255,255,.08);
+  box-shadow:none;
+}}
+button.ghost {{
+  background:transparent;
+  border:1px solid var(--line);
+  box-shadow:none;
+}}
+button.success {{
+  background:linear-gradient(135deg, #11b87d, #22d39a);
+}}
+button.danger {{
+  background:linear-gradient(135deg, #f5536d, #ff7a8e);
+}}
+.btn-row {{ display:flex; gap:10px; flex-wrap:wrap; }}
+.btn-row > * {{ width:auto; }}
+.hero-actions {{ display:flex; gap:12px; flex-wrap:wrap; margin-top:18px; }}
+.hero-actions button {{ width:auto; padding:14px 20px; }}
+.pill {{
+  display:inline-flex; align-items:center; gap:8px; padding:8px 12px;
+  border-radius:999px; background:rgba(255,255,255,.06); border:1px solid var(--line); font-size:13px;
+}}
+pre {{
+  margin:0; padding:14px; border-radius:16px; overflow:auto;
+  background:rgba(2,6,23,.75); border:1px solid var(--line); white-space:pre-wrap; word-break:break-word;
+}}
+table {{
+  width:100%; border-collapse:collapse; font-size:14px;
+}}
+th, td {{
+  padding:12px 10px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; vertical-align:top;
+}}
+thead th {{ color:#c9d5f0; font-weight:700; }}
+.small {{ font-size:13px; }}
+.center {{ text-align:center; }}
+.right {{ text-align:right; }}
+.hr {{
+  height:1px; background:linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
+  margin:16px 0;
+}}
+.price-card {{
+  position:relative; overflow:hidden;
+}}
+.price-card::after {{
+  content:""; position:absolute; inset:auto -40px -40px auto; width:120px; height:120px;
+  background:radial-gradient(circle, rgba(109,94,252,.28), transparent 60%);
+}}
+.price-tag {{
+  font-size:34px; font-weight:900; margin:8px 0 14px;
+}}
+.note {{ color:#ffcc8a; font-size:13px; }}
+.status-good {{ color:#8af0bd; }}
+.status-bad {{ color:#ff9faf; }}
+.section-title {{
+  display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+  margin-bottom:10px;
+}}
+.copyline {{
+  display:flex; gap:10px; flex-wrap:wrap;
+}}
+.copyline > *:first-child {{
+  flex:1 1 320px;
+}}
+.list-card {{
+  padding:14px; border-radius:18px; border:1px solid var(--line); background:rgba(255,255,255,.03); margin-bottom:12px;
+}}
+.footer-note {{
+  text-align:center; color:var(--muted); font-size:13px; margin-top:20px;
+}}
+@media (max-width: 740px) {{
+  .wrap {{ padding:18px 14px 40px; }}
+  .topnav {{ padding:14px; }}
+  .hero {{ padding:20px; }}
+  .card {{ padding:16px; border-radius:20px; }}
+}}
 </style>
 </head>
-<body><div class="wrap">{body}</div></body></html>"""
+<body>
+  <div class="wrap">
+    <div class="topnav">
+      <div class="brand">
+        <div class="brand-badge">✦</div>
+        <div>
+          <div style="font-size:18px;">Assistify AI</div>
+          <div class="muted small">AI klantenservice SaaS</div>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <a href="/"><button class="ghost" style="width:auto;">Home</button></a>
+        <a href="/signup"><button class="ghost" style="width:auto;">Signup</button></a>
+        <a href="/dashboard/login"><button class="ghost" style="width:auto;">Dashboard</button></a>
+        <a href="/admin"><button class="ghost" style="width:auto;">Admin</button></a>
+      </div>
+    </div>
+    {body}
+    <div class="footer-note">Assistify AI • {APP_VERSION}</div>
+  </div>
+</body>
+</html>"""
 
 
 def render_homepage_html():
-    return render_simple_page(
+    return render_shell(
         "Assistify AI",
         """
-<div class="card">
-  <h1 style="font-size:48px;margin-bottom:12px;">Assistify AI</h1>
-  <p class="muted" style="font-size:20px;max-width:760px;">
-    AI klantenservice software voor bedrijven. Laat bezoekers automatisch antwoorden krijgen,
-    leads achterlaten en snel doorgestuurd worden naar jouw team.
+<div class="hero">
+  <div class="kicker">⚡ Automatische support • Leads • Billing • Dashboard</div>
+  <h1>AI klantenservice die er niet goedkoop uitziet.</h1>
+  <p class="muted" style="max-width:760px;font-size:18px;">
+    Geef je website een slimme assistent die klantvragen beantwoordt, leads opvangt en je team tijd bespaart.
+    Alles in één modern dashboard met signup, billing en teambeheer.
   </p>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px;">
-    <button onclick="window.location.href='/signup'" style="width:auto;padding:14px 22px;">Start nu</button>
-    <button class="secondary" onclick="window.location.href='/dashboard/login'" style="width:auto;padding:14px 22px;">Klant login</button>
-    <button class="secondary" onclick="window.location.href='/admin'" style="width:auto;padding:14px 22px;">Admin</button>
+  <div class="hero-actions">
+    <button onclick="window.location.href='/signup'">Start met Assistify</button>
+    <button class="secondary" onclick="window.location.href='/dashboard/login'">Klantdashboard</button>
+    <button class="ghost" onclick="window.location.href='/admin'">Admin</button>
   </div>
 </div>
 
-<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));">
-  <div class="card">
-    <h2>Automatische antwoorden</h2>
-    <p class="muted">Beantwoord klantvragen direct via je eigen AI-widget op je website.</p>
+<div class="grid grid-3">
+  <div class="card card-soft">
+    <h3>🤖 Slimme widget</h3>
+    <p class="muted">Laat bezoekers direct antwoord krijgen via een snelle AI chat-widget op je website.</p>
   </div>
-  <div class="card">
-    <h2>Leads verzamelen</h2>
-    <p class="muted">Laat bezoekers eenvoudig hun gegevens achterlaten in je widget.</p>
+  <div class="card card-soft">
+    <h3>📥 Leads verzamelen</h3>
+    <p class="muted">Sales- en supportaanvragen komen automatisch binnen in je dashboard.</p>
   </div>
-  <div class="card">
-    <h2>Eigen dashboard</h2>
-    <p class="muted">Beheer je widget, teamleden, billing en instellingen vanuit één plek.</p>
-  </div>
-</div>
-
-<div class="card">
-  <h2>Pakketten</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Pakket</th>
-        <th>Geschikt voor</th>
-        <th>Berichten / maand</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Starter</td>
-        <td>Kleine bedrijven</td>
-        <td>500</td>
-      </tr>
-      <tr>
-        <td>Pro</td>
-        <td>Groeiende teams</td>
-        <td>5.000</td>
-      </tr>
-      <tr>
-        <td>Agency</td>
-        <td>Agencies en meerdere klanten</td>
-        <td>50.000</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-"""
-    )
-
-
-def render_admin_html():
-    return render_simple_page(
-        "Assistify Admin",
-        """
-<div id="loginView" class="card">
-  <h2>Admin login</h2>
-  <input id="u" placeholder="admin" />
-  <input id="p" type="password" placeholder="wachtwoord" />
-  <button onclick="login()">Inloggen</button>
-  <p id="status" class="muted"></p>
-</div>
-
-<div id="appView" style="display:none;">
-  <div class="card"><h2>Overzicht</h2><div id="overview" class="grid grid-4"></div></div>
-  <div class="card">
-    <h2>Tenants</h2>
-    <table><thead><tr><th>Naam</th><th>Slug</th><th>Plan</th><th>Status</th></tr></thead><tbody id="tenants"></tbody></table>
-  </div>
-  <div class="card">
-    <h2>Audit logs</h2>
-    <table><thead><tr><th>Tijd</th><th>Actor</th><th>Actie</th><th>Target</th><th>Meta</th></tr></thead><tbody id="auditLogs"></tbody></table>
+  <div class="card card-soft">
+    <h3>📊 Eigen klantdashboard</h3>
+    <p class="muted">Beheer je plan, API key, teamleden, leads en instellingen vanuit één mooie omgeving.</p>
   </div>
 </div>
 
-<script>
-async function api(path, options={}) {
-  const headers = options.headers || {};
-  if (!headers["Content-Type"] && !(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, {...options, headers, credentials:"include"});
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Er ging iets mis.");
-  return data;
-}
-function formatDate(ts){ return ts ? new Date(ts*1000).toLocaleString() : "-"; }
-async function login() {
-  try {
-    await api("/admin/login", {method:"POST", body:JSON.stringify({username:u.value.trim(), password:p.value.trim()})});
-    load();
-  } catch(e) { status.textContent = e.message; }
-}
-async function load() {
-  loginView.style.display = "none";
-  appView.style.display = "block";
-  const s = await api("/admin/stats/overview");
-  overview.innerHTML = `
-    <div class="card"><div class="muted">Tenants</div><div class="stats">${s.stats.tenant_count}</div></div>
-    <div class="card"><div class="muted">Leads</div><div class="stats">${s.stats.lead_count_total}</div></div>
-    <div class="card"><div class="muted">Berichten</div><div class="stats">${s.stats.message_count_total}</div></div>
-    <div class="card"><div class="muted">Sessies</div><div class="stats">${s.stats.session_count_total}</div></div>
-  `;
-  const t = await api("/admin/tenants");
-  tenants.innerHTML = (t.tenants || []).map(x => `<tr><td>${x.name}</td><td>${x.slug}</td><td>${x.plan_name}</td><td>${x.subscription_status}</td></tr>`).join("");
-
-  const logs = await api("/admin/audit-logs");
-  auditLogs.innerHTML = (logs.logs || []).map(x => `
-    <tr>
-      <td>${formatDate(x.created_at)}</td>
-      <td>${x.actor_type}:${x.actor_id || "-"}</td>
-      <td>${x.action}</td>
-      <td>${x.target_type}:${x.target_id || "-"}</td>
-      <td><pre>${JSON.stringify(JSON.parse(x.meta_json || "{}"), null, 2)}</pre></td>
-    </tr>
-  `).join("");
-}
-(async()=>{ try{ await api("/admin/me"); load(); }catch(e){} })();
-</script>
+<div class="grid grid-3" style="margin-top:18px;">
+  <div class="card price-card">
+    <div class="pill">Starter</div>
+    <div class="price-tag">500</div>
+    <p class="muted">berichten per maand voor kleine bedrijven en starters.</p>
+  </div>
+  <div class="card price-card">
+    <div class="pill">Pro</div>
+    <div class="price-tag">5.000</div>
+    <p class="muted">berichten per maand voor teams die serieus willen opschalen.</p>
+  </div>
+  <div class="card price-card">
+    <div class="pill">Agency</div>
+    <div class="price-tag">50.000</div>
+    <p class="muted">berichten per maand voor agencies en bedrijven met meerdere klanten of brands.</p>
+  </div>
+</div>
 """
     )
 
 
 def render_signup_html():
-    return render_simple_page(
+    return render_shell(
         "Assistify Signup",
         """
-<div class="card">
+<div class="hero">
+  <div class="kicker">🚀 Nieuwe klant onboarding</div>
   <h1>Start met Assistify AI</h1>
-  <p class="muted">Kies je plan, vul je e-mail in en rond de betaling af.</p>
-  <input id="email" placeholder="jij@bedrijf.nl" />
-  <div class="grid grid-2">
-    <button onclick="startSignup('starter')">Starter</button>
-    <button onclick="startSignup('pro')">Pro</button>
-  </div>
-  <button onclick="startSignup('agency')">Agency</button>
-  <p id="status" class="muted"></p>
+  <p class="muted" style="font-size:18px;">Kies je plan, vul je e-mail in en rond je betaling af via Stripe.</p>
 </div>
+
+<div class="card">
+  <div class="section-title">
+    <h2>Kies je pakket</h2>
+    <div class="pill">Agency vervangt Enterprise</div>
+  </div>
+  <input id="email" placeholder="jij@bedrijf.nl" />
+  <div class="grid grid-3" style="margin-top:8px;">
+    <div class="card price-card">
+      <h3>Starter</h3>
+      <div class="price-tag">500</div>
+      <p class="muted">Voor starters en kleine bedrijven.</p>
+      <button onclick="startSignup('starter')">Start Starter</button>
+    </div>
+    <div class="card price-card">
+      <h3>Pro</h3>
+      <div class="price-tag">5.000</div>
+      <p class="muted">Voor groeiende support- en sales teams.</p>
+      <button onclick="startSignup('pro')">Start Pro</button>
+    </div>
+    <div class="card price-card">
+      <h3>Agency</h3>
+      <div class="price-tag">50.000</div>
+      <p class="muted">Voor agencies en meerdere klanten.</p>
+      <button onclick="startSignup('agency')">Start Agency</button>
+    </div>
+  </div>
+  <p id="status" class="muted" style="margin-top:10px;"></p>
+</div>
+
 <script>
 async function startSignup(plan) {
-  status.textContent = "Bezig...";
+  status.textContent = "Bezig met checkout aanmaken...";
   try {
     const res = await fetch("/signup/create-checkout", {
       method: "POST",
@@ -1422,12 +1524,13 @@ async function startSignup(plan) {
 
 
 def render_signup_success_html():
-    return render_simple_page(
+    return render_shell(
         "Betaling gelukt",
         """
 <div class="card">
-  <h1>Betaling gelukt</h1>
-  <p class="muted">We halen nu je setup-link op.</p>
+  <div class="kicker">✅ Betaling ontvangen</div>
+  <h2>We maken je setup-link klaar</h2>
+  <p class="muted">Een ogenblik, we halen je onboarding-link op.</p>
   <p id="status">Bezig...</p>
 </div>
 <script>
@@ -1450,12 +1553,19 @@ def render_signup_success_html():
 
 
 def render_signup_cancel_html():
-    return render_simple_page("Betaling geannuleerd", """
+    return render_shell(
+        "Betaling geannuleerd",
+        """
 <div class="card">
-  <h1>Betaling geannuleerd</h1>
-  <p>Je kunt het opnieuw proberen via <a href="/signup">/signup</a>.</p>
+  <div class="kicker">↩ Betaling geannuleerd</div>
+  <h2>Je checkout is gestopt</h2>
+  <p class="muted">Je kunt het meteen opnieuw proberen.</p>
+  <div class="btn-row">
+    <button onclick="window.location.href='/signup'">Terug naar signup</button>
+  </div>
 </div>
-""")
+"""
+    )
 
 
 def render_onboarding_html(token: str, tenant: dict):
@@ -1468,27 +1578,38 @@ def render_onboarding_html(token: str, tenant: dict):
   data-title="{tenant["name"]}"
   data-color="{color}"
 ></script>'''
-    return render_simple_page(
+    return render_shell(
         "Assistify Onboarding",
         f"""
-<div class="card">
-  <h1>Je omgeving is aangemaakt</h1>
-  <p class="muted">Werk hieronder je eerste instellingen af en maak je login aan.</p>
-  <input id="full_name" placeholder="Jouw naam" />
-  <input id="password" type="password" placeholder="Nieuw wachtwoord (minimaal 8 tekens)" />
-  <input id="name" value="{tenant["name"]}" placeholder="Bedrijfsnaam" />
-  <input id="slug" value="{tenant["slug"]}" placeholder="slug" />
-  <input id="support_email" value="{tenant["support_email"]}" placeholder="support@email.nl" />
-  <input id="website_url" value="{tenant["website_url"]}" placeholder="https://jouwdomein.nl" />
-  <input id="widget_color" value="{tenant.get("widget_color", DEFAULT_WIDGET_COLOR)}" placeholder="#111111" />
-  <textarea id="company_description">{tenant["company_description"]}</textarea>
-  <button onclick="saveSetup()">Opslaan</button>
-  <p id="status" class="muted"></p>
+<div class="hero">
+  <div class="kicker">🎉 Nieuwe omgeving klaar</div>
+  <h1>Welkom bij Assistify</h1>
+  <p class="muted">Stel hieronder je eerste gegevens in en maak je dashboard-login aan.</p>
 </div>
 
 <div class="grid grid-2">
-  <div class="card"><h2>API key</h2><pre id="api_key">{tenant["api_key"]}</pre></div>
-  <div class="card"><h2>Embed code</h2><pre id="embed">{embed_code}</pre></div>
+  <div class="card">
+    <h2>Eerste setup</h2>
+    <input id="full_name" placeholder="Jouw naam" />
+    <input id="password" type="password" placeholder="Nieuw wachtwoord (minimaal 8 tekens)" />
+    <input id="name" value="{tenant["name"]}" placeholder="Bedrijfsnaam" />
+    <input id="slug" value="{tenant["slug"]}" placeholder="slug" />
+    <input id="support_email" value="{tenant["support_email"]}" placeholder="support@email.nl" />
+    <input id="website_url" value="{tenant["website_url"]}" placeholder="https://jouwdomein.nl" />
+    <input id="widget_color" value="{tenant.get("widget_color", DEFAULT_WIDGET_COLOR)}" placeholder="#6d5efc" />
+    <textarea id="company_description">{tenant["company_description"]}</textarea>
+    <button onclick="saveSetup()">Opslaan</button>
+    <p id="status" class="muted"></p>
+  </div>
+
+  <div class="card">
+    <h2>Integratie</h2>
+    <div class="muted">API key</div>
+    <pre id="api_key">{tenant["api_key"]}</pre>
+    <div class="hr"></div>
+    <div class="muted">Embed code</div>
+    <pre id="embed">{embed_code}</pre>
+  </div>
 </div>
 
 <script>
@@ -1524,15 +1645,22 @@ async function saveSetup() {{
 
 
 def render_dashboard_login_html():
-    return render_simple_page(
+    return render_shell(
         "Dashboard Login",
         """
-<div class="card">
+<div class="hero">
+  <div class="kicker">🔐 Klantomgeving</div>
   <h1>Klantdashboard login</h1>
+  <p class="muted">Log in om je widget, leads, billing en API key te beheren.</p>
+</div>
+
+<div class="card" style="max-width:720px;margin:0 auto;">
   <input id="email" placeholder="jij@bedrijf.nl" />
   <input id="password" type="password" placeholder="Wachtwoord" />
-  <button onclick="login()">Inloggen</button>
-  <button class="secondary" onclick="window.location.href='/reset-password/request'">Wachtwoord vergeten</button>
+  <div class="btn-row">
+    <button onclick="login()">Inloggen</button>
+    <button class="secondary" onclick="window.location.href='/reset-password/request'">Wachtwoord vergeten</button>
+  </div>
   <p id="status" class="muted"></p>
 </div>
 
@@ -1559,32 +1687,41 @@ async function login() {
 
 
 def render_dashboard_html():
-    return render_simple_page(
+    return render_shell(
         "Assistify Dashboard",
         """
-<div class="card">
-  <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
-    <h1>Assistify Klantdashboard</h1>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+<div class="hero">
+  <div class="section-title">
+    <div>
+      <div class="kicker">📈 Klantdashboard</div>
+      <h1>Beheer je Assistify omgeving</h1>
+      <p class="muted">Instellingen, API key, leads, teamleden en billing in één overzicht.</p>
+    </div>
+    <div class="btn-row">
       <button class="secondary" onclick="openPortal()">Billing portal</button>
-      <button class="secondary" onclick="window.location.href='/reset-password/request'">Reset wachtwoord</button>
-      <button class="secondary" onclick="logout()">Uitloggen</button>
+      <button class="ghost" onclick="window.location.href='/reset-password/request'">Reset wachtwoord</button>
+      <button class="danger" onclick="logout()">Uitloggen</button>
     </div>
   </div>
 </div>
 
-<div class="card">
-  <h2>Overzicht</h2>
-  <div id="overview" class="grid grid-4"></div>
+<div class="grid grid-4">
+  <div class="card"><div class="muted">Plan</div><div class="stats" id="statPlan">-</div></div>
+  <div class="card"><div class="muted">Status</div><div class="stats" id="statStatus">-</div></div>
+  <div class="card"><div class="muted">Berichten deze maand</div><div class="stats" id="statMessages">-</div></div>
+  <div class="card"><div class="muted">Resterend</div><div class="stats" id="statRemaining">-</div></div>
 </div>
 
-<div class="grid grid-2">
+<div class="grid grid-2" style="margin-top:18px;">
   <div class="card">
-    <h2>Instellingen</h2>
+    <div class="section-title">
+      <h2>Bedrijfsinstellingen</h2>
+      <div class="pill">Live widget styling</div>
+    </div>
     <input id="name" placeholder="Bedrijfsnaam" />
     <input id="support_email" placeholder="support@email.nl" />
     <input id="website_url" placeholder="https://jouwdomein.nl" />
-    <input id="widget_color" placeholder="#111111" />
+    <input id="widget_color" placeholder="#6d5efc" />
     <textarea id="company_description" placeholder="Bedrijfsomschrijving"></textarea>
     <textarea id="faq_context" placeholder="FAQ context"></textarea>
     <button onclick="saveSettings()">Opslaan</button>
@@ -1592,46 +1729,62 @@ def render_dashboard_html():
   </div>
 
   <div class="card">
-    <h2>Integratie</h2>
+    <div class="section-title">
+      <h2>Integratie</h2>
+      <div class="pill" id="tenantSlugPill">slug</div>
+    </div>
     <div class="muted">API key</div>
-    <pre id="apiKeyBox"></pre>
+    <div class="copyline" style="margin:8px 0 12px;">
+      <pre id="apiKeyBox"></pre>
+      <button class="secondary" onclick="copyApiKey()" style="width:auto;">Kopieer</button>
+      <button class="secondary" onclick="rotateApiKey()" style="width:auto;">Vernieuw key</button>
+    </div>
     <div class="muted">Embed code</div>
     <pre id="embedBox"></pre>
+    <p id="apiStatus" class="muted" style="margin-top:10px;"></p>
   </div>
 </div>
 
-<div class="grid grid-2">
+<div class="grid grid-2" style="margin-top:18px;">
   <div class="card">
-    <h2>Teamleden</h2>
+    <div class="section-title">
+      <h2>Teamleden</h2>
+      <div class="pill">Owner kan invites maken</div>
+    </div>
     <table>
       <thead><tr><th>Naam</th><th>E-mail</th><th>Owner</th><th>Actief</th></tr></thead>
       <tbody id="teamTable"></tbody>
     </table>
+    <div class="hr"></div>
+    <h3>Nieuwe invite</h3>
+    <input id="invite_full_name" placeholder="Naam" />
+    <input id="invite_email" placeholder="email@bedrijf.nl" />
+    <button onclick="sendInvite()">Invite versturen</button>
+    <pre id="inviteResult"></pre>
   </div>
 
   <div class="card">
-    <h2>Team invite</h2>
-    <input id="invite_full_name" placeholder="Naam" />
-    <input id="invite_email" placeholder="email@bedrijf.nl" />
-    <button onclick="sendInvite()">Invite aanmaken</button>
-    <pre id="inviteResult"></pre>
+    <div class="section-title">
+      <h2>Leads</h2>
+      <div class="btn-row">
+        <button class="secondary" onclick="loadLeads()">Verversen</button>
+        <button class="secondary" onclick="exportLeads()">CSV export</button>
+      </div>
+    </div>
+    <input id="leadSearch" placeholder="Zoek lead..." onkeydown="if(event.key==='Enter') loadLeads();" />
+    <div id="leadsBox"></div>
   </div>
 </div>
 
-<div class="grid grid-2">
-  <div class="card">
-    <h2>Leads</h2>
-    <button class="secondary" onclick="loadLeads()">Leads verversen</button>
-    <div id="leadsBox"></div>
-  </div>
-
-  <div class="card">
+<div class="card" style="margin-top:18px;">
+  <div class="section-title">
     <h2>Audit logs</h2>
-    <table>
-      <thead><tr><th>Tijd</th><th>Actie</th><th>Target</th><th>Meta</th></tr></thead>
-      <tbody id="auditTable"></tbody>
-    </table>
+    <div class="pill">Activiteit in je omgeving</div>
   </div>
+  <table>
+    <thead><tr><th>Tijd</th><th>Actie</th><th>Target</th><th>Meta</th></tr></thead>
+    <tbody id="auditTable"></tbody>
+  </table>
 </div>
 
 <script>
@@ -1661,16 +1814,14 @@ async function loadDashboard() {
   company_description.value = tenant.company_description || "";
   faq_context.value = tenant.faq_context || "";
 
+  statPlan.textContent = tenant.plan_name || "-";
+  statStatus.textContent = tenant.subscription_status || "-";
+  statMessages.textContent = statsData.stats.message_count_current_month ?? "-";
+  statRemaining.textContent = statsData.stats.monthly_message_remaining ?? "-";
+
+  tenantSlugPill.textContent = tenant.slug || "slug";
   apiKeyBox.textContent = me.tenant.api_key || "";
   embedBox.textContent = me.embed_code || "";
-
-  const s = statsData.stats;
-  overview.innerHTML = `
-    <div class="card"><div class="muted">Plan</div><div class="stats">${tenant.plan_name}</div></div>
-    <div class="card"><div class="muted">Status</div><div class="stats">${tenant.subscription_status}</div></div>
-    <div class="card"><div class="muted">Berichten deze maand</div><div class="stats">${s.message_count_current_month}</div></div>
-    <div class="card"><div class="muted">Resterend</div><div class="stats">${s.monthly_message_remaining}</div></div>
-  `;
 
   teamTable.innerHTML = (teamData.users || []).map(u => `
     <tr><td>${u.full_name || "-"}</td><td>${u.email}</td><td>${u.is_owner ? "Ja" : "Nee"}</td><td>${u.is_active ? "Ja" : "Nee"}</td></tr>
@@ -1690,17 +1841,18 @@ async function loadDashboard() {
 
 async function loadLeads() {
   try {
-    const data = await api("/dashboard/leads");
+    const q = encodeURIComponent((leadSearch.value || "").trim());
+    const data = await api("/dashboard/leads?q=" + q);
     leadsBox.innerHTML = (data.leads || []).length
       ? data.leads.map(l => `
-        <div class="card">
+        <div class="list-card">
           <strong>${l.name}</strong> <span class="muted">(${l.email})</span><br>
           <span class="muted">${l.phone || "-"}</span><br>
           <span class="muted">${formatDate(l.created_at)} • ${l.source}</span>
           <div style="margin-top:8px;">${l.message}</div>
         </div>
       `).join("")
-      : "<p class='muted'>Nog geen leads.</p>";
+      : "<p class='muted'>Nog geen leads gevonden.</p>";
   } catch (e) {
     leadsBox.innerHTML = "<p class='muted'>" + e.message + "</p>";
   }
@@ -1754,6 +1906,28 @@ async function openPortal() {
   }
 }
 
+async function rotateApiKey() {
+  apiStatus.textContent = "API key vernieuwen...";
+  try {
+    const data = await api("/dashboard/rotate-api-key", {method:"POST", body: JSON.stringify({})});
+    apiKeyBox.textContent = data.tenant.api_key || "";
+    embedBox.textContent = data.embed_code || "";
+    apiStatus.textContent = "Nieuwe API key opgeslagen.";
+  } catch(e) {
+    apiStatus.textContent = e.message;
+  }
+}
+
+function copyApiKey() {
+  navigator.clipboard.writeText(apiKeyBox.textContent || "");
+  apiStatus.textContent = "API key gekopieerd.";
+}
+
+function exportLeads() {
+  const q = encodeURIComponent((leadSearch.value || "").trim());
+  window.location.href = "/dashboard/leads/export.csv?q=" + q;
+}
+
 async function logout() {
   await api("/dashboard/logout", {method:"POST", body: JSON.stringify({})});
   window.location.href = "/dashboard/login";
@@ -1765,12 +1939,103 @@ async function logout() {
     )
 
 
+def render_admin_html():
+    return render_shell(
+        "Assistify Admin",
+        """
+<div id="loginView" class="card" style="max-width:720px;margin:0 auto;">
+  <div class="kicker">🛡 Admin omgeving</div>
+  <h2>Admin login</h2>
+  <input id="u" placeholder="admin" />
+  <input id="p" type="password" placeholder="wachtwoord" />
+  <button onclick="login()">Inloggen</button>
+  <p id="status" class="muted"></p>
+</div>
+
+<div id="appView" style="display:none;">
+  <div class="hero">
+    <div class="section-title">
+      <div>
+        <div class="kicker">📊 Overzicht</div>
+        <h1>Assistify Admin Dashboard</h1>
+        <p class="muted">Bekijk tenants, gebruik en audit logs in een nettere adminomgeving.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="overview" class="grid grid-4"></div>
+
+  <div class="grid grid-2" style="margin-top:18px;">
+    <div class="card">
+      <h2>Tenants</h2>
+      <table><thead><tr><th>Naam</th><th>Slug</th><th>Plan</th><th>Status</th></tr></thead><tbody id="tenants"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Audit logs</h2>
+      <table><thead><tr><th>Tijd</th><th>Actor</th><th>Actie</th><th>Target</th></tr></thead><tbody id="auditLogs"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+async function api(path, options={}) {
+  const headers = options.headers || {};
+  if (!headers["Content-Type"] && !(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, {...options, headers, credentials:"include"});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Er ging iets mis.");
+  return data;
+}
+function formatDate(ts){ return ts ? new Date(ts*1000).toLocaleString() : "-"; }
+
+async function login() {
+  try {
+    await api("/admin/login", {method:"POST", body:JSON.stringify({username:u.value.trim(), password:p.value.trim()})});
+    load();
+  } catch(e) { status.textContent = e.message; }
+}
+
+async function load() {
+  loginView.style.display = "none";
+  appView.style.display = "block";
+
+  const s = await api("/admin/stats/overview");
+  overview.innerHTML = `
+    <div class="card"><div class="muted">Tenants</div><div class="stats">${s.stats.tenant_count}</div></div>
+    <div class="card"><div class="muted">Leads</div><div class="stats">${s.stats.lead_count_total}</div></div>
+    <div class="card"><div class="muted">Berichten</div><div class="stats">${s.stats.message_count_total}</div></div>
+    <div class="card"><div class="muted">Sessies</div><div class="stats">${s.stats.session_count_total}</div></div>
+  `;
+
+  const t = await api("/admin/tenants");
+  tenants.innerHTML = (t.tenants || []).map(x => `
+    <tr><td>${x.name}</td><td>${x.slug}</td><td>${x.plan_name}</td><td>${x.subscription_status}</td></tr>
+  `).join("");
+
+  const logs = await api("/admin/audit-logs");
+  auditLogs.innerHTML = (logs.logs || []).map(x => `
+    <tr>
+      <td>${formatDate(x.created_at)}</td>
+      <td>${x.actor_type}:${x.actor_id || "-"}</td>
+      <td>${x.action}</td>
+      <td>${x.target_type}:${x.target_id || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+(async()=>{ try { await api("/admin/me"); load(); } catch(e) {} })();
+</script>
+"""
+    )
+
+
 def render_invite_accept_html(token: str, invite_row: dict):
-    return render_simple_page(
+    return render_shell(
         "Team Invite",
         f"""
-<div class="card">
-  <h1>Je bent uitgenodigd</h1>
+<div class="card" style="max-width:760px;margin:0 auto;">
+  <div class="kicker">👥 Team uitnodiging</div>
+  <h2>Je bent uitgenodigd</h2>
   <p class="muted">Maak hieronder je account aan.</p>
   <input id="full_name" value="{invite_row.get("full_name","")}" placeholder="Naam" />
   <input id="email" value="{invite_row.get("email","")}" placeholder="E-mail" />
@@ -1804,11 +2069,12 @@ async function acceptInvite() {{
 
 
 def render_reset_request_html():
-    return render_simple_page(
+    return render_shell(
         "Wachtwoord reset aanvragen",
         """
-<div class="card">
-  <h1>Wachtwoord reset</h1>
+<div class="card" style="max-width:760px;margin:0 auto;">
+  <div class="kicker">🔑 Wachtwoord reset</div>
+  <h2>Vraag een reset aan</h2>
   <input id="email" placeholder="jij@bedrijf.nl" />
   <button onclick="requestReset()">Reset aanvragen</button>
   <pre id="result"></pre>
@@ -1834,11 +2100,12 @@ async function requestReset() {
 
 
 def render_reset_password_html(token: str):
-    return render_simple_page(
+    return render_shell(
         "Nieuw wachtwoord",
         f"""
-<div class="card">
-  <h1>Nieuw wachtwoord instellen</h1>
+<div class="card" style="max-width:760px;margin:0 auto;">
+  <div class="kicker">🔒 Nieuw wachtwoord</div>
+  <h2>Stel een nieuw wachtwoord in</h2>
   <input id="password" type="password" placeholder="Nieuw wachtwoord" />
   <button onclick="saveNewPassword()">Opslaan</button>
   <p id="status" class="muted"></p>
@@ -1864,7 +2131,7 @@ async function saveNewPassword() {{
     )
 
 # =========================
-# STARTUP HOOK
+# HOOKS
 # =========================
 @app.before_request
 def before_any_request():
@@ -2098,6 +2365,7 @@ def signup_complete_save(token):
   data-title="{tenant["name"]}"
   data-color="{tenant.get("widget_color") or DEFAULT_WIDGET_COLOR}"
 ></script>'''
+
     return jsonify({
         "ok": True,
         "tenant": {
@@ -2145,7 +2413,7 @@ def invite_accept_submit(token):
     return jsonify({"ok": True, "user": {"id": user["id"], "email": user["email"]}})
 
 # =========================
-# RESET PASSWORD FLOW
+# RESET PASSWORD
 # =========================
 @app.route("/reset-password/request", methods=["POST"])
 def reset_password_request_submit():
@@ -2221,7 +2489,7 @@ def widget_js():
     var tenantKey = currentScript ? currentScript.getAttribute("data-tenant-key") : "";
     var apiBase = currentScript ? currentScript.getAttribute("data-api-base") : "";
     var title = currentScript ? currentScript.getAttribute("data-title") : "Chat";
-    var accent = currentScript ? currentScript.getAttribute("data-color") : "#111111";
+    var accent = currentScript ? currentScript.getAttribute("data-color") : "#6d5efc";
     if (!tenantKey || !apiBase) return;
 
     var sessionId = localStorage.getItem("assistify_session_id");
@@ -2236,21 +2504,21 @@ def widget_js():
       <div id="assistify-box" style="display:none;position:fixed;bottom:80px;right:20px;z-index:999999;width:360px;max-width:calc(100vw - 40px);height:560px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.18);overflow:hidden;font-family:Arial,sans-serif;border:1px solid #e5e7eb;">
         <div style="background:${accent};color:#fff;padding:14px 16px;font-weight:700;">${title}</div>
         <div id="assistify-tabs" style="display:flex;border-bottom:1px solid #eee;">
-          <button data-tab="chat" style="flex:1;padding:10px;border:none;background:#fff;cursor:pointer;">Chat</button>
-          <button data-tab="lead" style="flex:1;padding:10px;border:none;background:#fff;cursor:pointer;">Lead</button>
+          <button data-tab="chat" style="flex:1;padding:10px;border:none;background:#fff;cursor:pointer;color:#111;">Chat</button>
+          <button data-tab="lead" style="flex:1;padding:10px;border:none;background:#fff;cursor:pointer;color:#111;">Lead</button>
         </div>
         <div id="assistify-chat-tab">
           <div id="assistify-messages" style="height:320px;overflow:auto;padding:14px;background:#f9fafb;"></div>
           <div style="padding:12px;border-top:1px solid #eee;background:#fff;">
-            <textarea id="assistify-input" placeholder="Typ je bericht..." style="width:100%;height:70px;resize:none;border:1px solid #ddd;border-radius:10px;padding:10px;box-sizing:border-box;font-family:Arial,sans-serif;"></textarea>
+            <textarea id="assistify-input" placeholder="Typ je bericht..." style="width:100%;height:70px;resize:none;border:1px solid #ddd;border-radius:10px;padding:10px;box-sizing:border-box;font-family:Arial,sans-serif;color:#111;background:#fff;"></textarea>
             <button id="assistify-send" style="width:100%;margin-top:8px;background:${accent};color:#fff;border:none;border-radius:10px;padding:12px;cursor:pointer;font-weight:600;">Versturen</button>
           </div>
         </div>
         <div id="assistify-lead-tab" style="display:none;padding:12px;background:#fff;height:430px;overflow:auto;">
-          <input id="assistify-lead-name" placeholder="Naam" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;">
-          <input id="assistify-lead-email" placeholder="E-mail" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;">
-          <input id="assistify-lead-phone" placeholder="Telefoon" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;">
-          <textarea id="assistify-lead-message" placeholder="Waar kunnen we mee helpen?" style="width:100%;height:120px;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;"></textarea>
+          <input id="assistify-lead-name" placeholder="Naam" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;color:#111;background:#fff;">
+          <input id="assistify-lead-email" placeholder="E-mail" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;color:#111;background:#fff;">
+          <input id="assistify-lead-phone" placeholder="Telefoon" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;color:#111;background:#fff;">
+          <textarea id="assistify-lead-message" placeholder="Waar kunnen we mee helpen?" style="width:100%;height:120px;padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:10px;color:#111;background:#fff;"></textarea>
           <button id="assistify-lead-send" style="width:100%;background:${accent};color:#fff;border:none;border-radius:10px;padding:12px;cursor:pointer;font-weight:600;">Lead versturen</button>
           <div id="assistify-lead-status" style="margin-top:8px;font-size:14px;color:#444;"></div>
         </div>
@@ -2450,7 +2718,7 @@ def widget_lead():
         return jsonify({"ok": False, "error": "Lead opslaan mislukt.", "details": str(e)}), 500
 
 # =========================
-# AUTH ROUTES
+# AUTH
 # =========================
 @app.route("/admin/login", methods=["POST"])
 def admin_login():
@@ -2475,13 +2743,7 @@ def admin_login():
     session["admin_username"] = username
     session.permanent = True
 
-    create_audit_log(
-        None, "admin", username, "admin_login",
-        "session", "",
-        {"username": username},
-        get_client_ip()
-    )
-
+    create_audit_log(None, "admin", username, "admin_login", "session", "", {"username": username}, get_client_ip())
     return jsonify({"ok": True, "message": "Ingelogd."})
 
 
@@ -2511,13 +2773,7 @@ def dashboard_login():
     session["customer_email"] = user["email"]
     session.permanent = True
 
-    create_audit_log(
-        user["tenant_id"], "customer_user", user["id"], "customer_login",
-        "session", "",
-        {"email": user["email"]},
-        get_client_ip()
-    )
-
+    create_audit_log(user["tenant_id"], "customer_user", user["id"], "customer_login", "session", "", {"email": user["email"]}, get_client_ip())
     return jsonify({"ok": True})
 
 
@@ -2526,18 +2782,13 @@ def dashboard_logout():
     tenant_id = session.get("customer_tenant_id")
     user_id = session.get("customer_user_id")
     if tenant_id and user_id:
-        create_audit_log(
-            tenant_id, "customer_user", user_id, "customer_logout",
-            "session", "",
-            {},
-            get_client_ip()
-        )
+        create_audit_log(tenant_id, "customer_user", user_id, "customer_logout", "session", "", {}, get_client_ip())
     for key in ["customer_logged_in", "customer_user_id", "customer_tenant_id", "customer_email"]:
         session.pop(key, None)
     return jsonify({"ok": True})
 
 # =========================
-# DASHBOARD ROUTES
+# DASHBOARD
 # =========================
 @app.route("/dashboard/me", methods=["GET"])
 def dashboard_me():
@@ -2612,8 +2863,12 @@ def dashboard_settings():
 ></script>'''
 
     create_audit_log(
-        tenant["id"], "customer_user", session["customer_user_id"], "tenant_settings_updated",
-        "tenant", tenant["id"],
+        tenant["id"],
+        "customer_user",
+        session["customer_user_id"],
+        "tenant_settings_updated",
+        "tenant",
+        tenant["id"],
         {
             "before": {
                 "name": before["name"],
@@ -2628,6 +2883,52 @@ def dashboard_settings():
                 "widget_color": tenant.get("widget_color"),
             }
         },
+        get_client_ip()
+    )
+
+    return jsonify({
+        "ok": True,
+        "tenant": {
+            "id": tenant["id"],
+            "name": tenant["name"],
+            "slug": tenant["slug"],
+            "api_key": tenant["api_key"],
+            "widget_color": tenant.get("widget_color") or DEFAULT_WIDGET_COLOR
+        },
+        "embed_code": embed_code
+    })
+
+
+@app.route("/dashboard/rotate-api-key", methods=["POST"])
+def dashboard_rotate_api_key():
+    if not require_customer():
+        return customer_forbidden()
+
+    user = get_customer_user_by_id(session["customer_user_id"])
+    if not user or int(user.get("is_owner", 0)) != 1:
+        return jsonify({"ok": False, "error": "Alleen owner kan de API key vernieuwen."}), 403
+
+    tenant = rotate_tenant_api_key(session["customer_tenant_id"])
+    if not tenant:
+        return jsonify({"ok": False, "error": "Tenant niet gevonden."}), 404
+
+    host = PUBLIC_APP_URL.strip() or request.host_url.rstrip("/")
+    embed_code = f'''<script
+  src="{host}/widget.js"
+  data-api-base="{host}"
+  data-tenant-key="{tenant["api_key"]}"
+  data-title="{tenant["name"]}"
+  data-color="{tenant.get("widget_color") or DEFAULT_WIDGET_COLOR}"
+></script>'''
+
+    create_audit_log(
+        tenant["id"],
+        "customer_user",
+        session["customer_user_id"],
+        "api_key_rotated",
+        "tenant",
+        tenant["id"],
+        {},
         get_client_ip()
     )
 
@@ -2684,8 +2985,12 @@ def dashboard_team_invite():
         email_error = str(e)
 
     create_audit_log(
-        session["customer_tenant_id"], "customer_user", current_user["id"], "team_invite_created",
-        "invite_token", token,
+        session["customer_tenant_id"],
+        "customer_user",
+        current_user["id"],
+        "team_invite_created",
+        "invite_token",
+        token,
         {"email": email, "full_name": full_name, "email_sent": email_sent, "email_error": email_error},
         get_client_ip()
     )
@@ -2707,12 +3012,7 @@ def dashboard_billing_portal():
         return customer_forbidden()
     try:
         portal = create_stripe_portal_for_tenant(tenant)
-        create_audit_log(
-            tenant["id"], "customer_user", session["customer_user_id"], "billing_portal_opened",
-            "tenant", tenant["id"],
-            {},
-            get_client_ip()
-        )
+        create_audit_log(tenant["id"], "customer_user", session["customer_user_id"], "billing_portal_opened", "tenant", tenant["id"], {}, get_client_ip())
         return jsonify({"ok": True, "url": portal.url})
     except Exception as e:
         return jsonify({"ok": False, "error": "Billing portal openen mislukt.", "details": str(e)}), 500
@@ -2733,8 +3033,24 @@ def dashboard_leads():
     query = (request.args.get("q") or "").strip()
     return jsonify({"ok": True, "leads": get_tenant_leads(session["customer_tenant_id"], query)})
 
+
+@app.route("/dashboard/leads/export.csv", methods=["GET"])
+def dashboard_leads_export():
+    if not require_customer():
+        return customer_forbidden()
+    tenant = get_tenant_by_id(session["customer_tenant_id"])
+    if not tenant:
+        return customer_forbidden()
+    query = (request.args.get("q") or "").strip()
+    leads = get_tenant_leads(session["customer_tenant_id"], query)
+    return make_csv_response(
+        f"leads-{tenant['slug']}.csv",
+        leads,
+        ["id", "name", "email", "phone", "message", "source", "created_at"]
+    )
+
 # =========================
-# ADMIN ROUTES
+# ADMIN
 # =========================
 @app.route("/admin/tenants", methods=["GET"])
 def admin_tenants():
