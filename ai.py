@@ -463,7 +463,7 @@ input, textarea, select { width:100%; padding:12px; margin:8px 0 14px 0; border:
 @media (max-width: 900px) { .grid2, .grid3 { grid-template-columns:1fr; } }
 """
 
-HOME_HTML = """
+HOME_HTML =HOME_HTML = """
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -471,89 +471,492 @@ HOME_HTML = """
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Assistify AI</title>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
-      font-family: Arial, sans-serif;
-      background: #f3f4f6;
-      color: #111827;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #eef1f5;
+      color: #0f172a;
     }
+
     .container {
       max-width: 1200px;
-      margin: auto;
-      padding: 40px 20px;
+      margin: 0 auto;
+      padding: 24px;
     }
-    .hero {
+
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 22px 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 28px;
+      font-weight: 800;
+      color: #0f172a;
+      text-decoration: none;
+    }
+
+    .brand img {
+      width: 42px;
+      height: 42px;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: #0f172a;
+      font-weight: 600;
+      padding: 10px 16px;
+      border-radius: 12px;
+    }
+
+    .nav-links a:hover {
+      background: rgba(15, 23, 42, 0.06);
+    }
+
+    .nav-login {
+      background: #0f172a;
+      color: white !important;
+    }
+
+    .card {
       background: white;
-      padding: 60px;
-      border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-      margin-bottom: 40px;
+      border-radius: 28px;
+      padding: 42px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
+      margin-bottom: 24px;
     }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 30px;
+      align-items: center;
+    }
+
     .hero h1 {
-      font-size: 48px;
-      margin-bottom: 10px;
+      font-size: 56px;
+      line-height: 1.05;
+      margin: 0 0 16px 0;
     }
+
     .hero p {
-      font-size: 18px;
-      color: #6b7280;
+      font-size: 20px;
+      line-height: 1.6;
+      color: #475569;
+      margin: 0 0 14px 0;
     }
-    .buttons {
-      margin-top: 25px;
+
+    .hero-buttons {
+      margin-top: 26px;
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
     }
+
     .btn {
       display: inline-block;
-      padding: 14px 26px;
-      background: #111827;
-      color: white;
-      border-radius: 12px;
       text-decoration: none;
-      font-weight: bold;
-      margin-right: 10px;
+      padding: 15px 24px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 16px;
+      transition: 0.2s ease;
     }
-    .btn.secondary {
+
+    .btn-primary {
+      background: #0f172a;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.92;
+    }
+
+    .btn-secondary {
       background: #6366f1;
+      color: white;
     }
-    .section {
+
+    .btn-secondary:hover {
+      opacity: 0.92;
+    }
+
+    .demo-box {
+      background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+      border: 1px solid #e5e7eb;
+      border-radius: 22px;
+      padding: 22px;
+    }
+
+    .demo-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #6366f1;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .demo-chat {
       background: white;
-      padding: 40px;
-      border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
     }
-    .shop {
-      padding: 14px 0;
-      border-bottom: 1px solid #eee;
+
+    .bubble {
+      padding: 12px 14px;
+      border-radius: 14px;
+      margin-bottom: 10px;
+      max-width: 85%;
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    .bubble.bot {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+
+    .bubble.user {
+      background: #0f172a;
+      color: white;
+      margin-left: auto;
+    }
+
+    .section-title {
+      font-size: 34px;
+      margin: 0 0 18px 0;
+    }
+
+    .section-subtitle {
+      color: #475569;
+      font-size: 18px;
+      margin-bottom: 26px;
+    }
+
+    .feature-grid,
+    .steps-grid,
+    .pricing-grid {
+      display: grid;
+      gap: 20px;
+    }
+
+    .feature-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .steps-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .pricing-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .mini-card {
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 20px;
+      padding: 24px;
+    }
+
+    .mini-card h3 {
+      margin: 0 0 10px 0;
+      font-size: 22px;
+    }
+
+    .mini-card p {
+      margin: 0;
+      color: #475569;
+      line-height: 1.6;
+    }
+
+    .step-number {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      background: #0f172a;
+      color: white;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+
+    .price-card {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 22px;
+      padding: 26px;
+      position: relative;
+    }
+
+    .price-card.featured {
+      border: 2px solid #6366f1;
+      box-shadow: 0 12px 30px rgba(99, 102, 241, 0.10);
+    }
+
+    .badge {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      background: #6366f1;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 7px 10px;
+      border-radius: 999px;
+    }
+
+    .price-card h3 {
+      margin: 0 0 10px 0;
+      font-size: 26px;
+    }
+
+    .price {
+      font-size: 38px;
+      font-weight: 800;
+      margin: 0 0 16px 0;
+    }
+
+    .price span {
+      font-size: 15px;
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    .price-card ul {
+      margin: 0 0 22px 0;
+      padding-left: 18px;
+      color: #475569;
+      line-height: 1.9;
+    }
+
+    .shops-list .shop-item {
+      padding: 16px 0;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .shops-list .shop-item:first-child {
+      border-top: none;
+    }
+
+    .shops-list a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .footer {
+      text-align: center;
+      color: #64748b;
+      padding: 12px 0 40px 0;
+      font-size: 14px;
+    }
+
+    @media (max-width: 1000px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .feature-grid,
+      .steps-grid,
+      .pricing-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero h1 {
+        font-size: 42px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .navbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+      }
+
+      .nav-links {
+        width: 100%;
+      }
+
+      .hero h1 {
+        font-size: 34px;
+      }
+
+      .card {
+        padding: 24px;
+      }
     }
   </style>
 </head>
 <body>
+
   <div class="container">
-    <div class="hero">
-      <div style="display:flex;align-items:center;gap:14px;">
-        <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="45" alt="Assistify AI logo">
-        <h1>Assistify AI</h1>
-      </div>
 
-      <p>AI klantenservice chatbot voor websites</p>
-      <p>Automatische klantenservice • Stripe abonnementen • Dashboard • AI chatbot widget</p>
+    <div class="navbar">
+      <a href="/" class="brand">
+        <img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" alt="Assistify AI logo">
+        <span>Assistify AI</span>
+      </a>
 
-      <div class="buttons">
-        <a class="btn" href="/shop/demo-shop">Open Demo Shop</a>
-        <a class="btn secondary" href="/pricing">Bekijk prijzen</a>
-        <a class="btn" href="/admin/login">Admin login</a>
-        <a class="btn" href="/client/login">Client login</a>
+      <div class="nav-links">
+        <a href="/pricing">Pricing</a>
+        <a href="/client/login" class="nav-login">Login</a>
       </div>
     </div>
 
-    <div class="section">
-      <h2>Actieve shops</h2>
-      {% for shop in shops %}
-      <div class="shop">
-        <strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }}<br>
-        <a href="/shop/{{ shop['slug'] }}">Open shop</a>
+    <div class="card hero">
+      <div>
+        <h1>AI klantenservice voor websites</h1>
+        <p>Automatiseer support met AI en verkoop meer via je website.</p>
+
+        <div class="hero-buttons">
+          <a class="btn btn-primary" href="/shop/demo-shop">Start demo</a>
+          <a class="btn btn-secondary" href="/pricing">Bekijk prijzen</a>
+        </div>
       </div>
-      {% endfor %}
+
+      <div class="demo-box">
+        <div class="demo-label">Demo chatbot</div>
+        <div class="demo-chat">
+          <div class="bubble bot">Hallo! Hoe kan ik je helpen?</div>
+          <div class="bubble user">Wat kost jullie service?</div>
+          <div class="bubble bot">Je kunt kiezen uit Starter, Pro of Agency. Wil je dat ik de verschillen laat zien?</div>
+        </div>
+      </div>
     </div>
+
+    <div class="card">
+      <h2 class="section-title">Features</h2>
+      <p class="section-subtitle">Alles wat je nodig hebt om bezoekers automatisch te helpen en leads te verzamelen.</p>
+
+      <div class="feature-grid">
+        <div class="mini-card">
+          <h3>🤖 AI Chatbot</h3>
+          <p>Automatische antwoorden voor bezoekers op basis van jouw website en kennis.</p>
+        </div>
+
+        <div class="mini-card">
+          <h3>📈 Lead generatie</h3>
+          <p>De AI verzamelt leads uit gesprekken en zet ze direct klaar in je dashboard.</p>
+        </div>
+
+        <div class="mini-card">
+          <h3>⚡ Website training</h3>
+          <p>Train AI op je eigen website zodat antwoorden relevant en slim blijven.</p>
+        </div>
+
+        <div class="mini-card">
+          <h3>💳 Stripe abonnementen</h3>
+          <p>Klanten betalen automatisch via Stripe met duidelijke SaaS-plannen.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Hoe het werkt</h2>
+      <p class="section-subtitle">Binnen korte tijd live op je website.</p>
+
+      <div class="steps-grid">
+        <div class="mini-card">
+          <div class="step-number">1</div>
+          <h3>Voeg widget toe</h3>
+          <p>Plaats de chatbot-widget op je website met één simpele installatie.</p>
+        </div>
+
+        <div class="mini-card">
+          <div class="step-number">2</div>
+          <h3>Train AI op je content</h3>
+          <p>Laat de AI leren van je website, FAQ en bedrijfsinformatie.</p>
+        </div>
+
+        <div class="mini-card">
+          <div class="step-number">3</div>
+          <h3>AI helpt bezoekers</h3>
+          <p>De chatbot beantwoordt vragen, helpt klanten en vangt leads op.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Pricing</h2>
+      <p class="section-subtitle">Kies het plan dat past bij jouw bedrijf.</p>
+
+      <div class="pricing-grid">
+        <div class="price-card">
+          <h3>Starter</h3>
+          <p class="price">€39.99 <span>/ maand</span></p>
+          <ul>
+            <li>1 website</li>
+            <li>AI chatbot</li>
+            <li>Dashboard</li>
+          </ul>
+          <a class="btn btn-primary" href="/pricing">Start Starter</a>
+        </div>
+
+        <div class="price-card featured">
+          <div class="badge">Populair</div>
+          <h3>Pro</h3>
+          <p class="price">€79.99 <span>/ maand</span></p>
+          <ul>
+            <li>5 websites</li>
+            <li>AI training</li>
+            <li>Analytics</li>
+          </ul>
+          <a class="btn btn-secondary" href="/pricing">Start Pro</a>
+        </div>
+
+        <div class="price-card">
+          <h3>Agency</h3>
+          <p class="price">€199.99 <span>/ maand</span></p>
+          <ul>
+            <li>Unlimited websites</li>
+            <li>White label</li>
+            <li>Priority support</li>
+          </ul>
+          <a class="btn btn-primary" href="/pricing">Start Agency</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Actieve shops</h2>
+      <div class="shops-list">
+        {% for shop in shops %}
+        <div class="shop-item">
+          <strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }}<br>
+          <a href="/shop/{{ shop['slug'] }}">Open shop</a>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="footer">
+      © Assistify AI
+    </div>
+
   </div>
+
 </body>
 </html>
 """
@@ -908,10 +1311,8 @@ document.getElementById("messageInput").addEventListener("keydown", function(e) 
 # =========================
 @app.route("/")
 def home():
-    conn = get_conn()
-    shops = conn.execute("SELECT * FROM shops WHERE is_active = 1 ORDER BY id DESC").fetchall()
-    conn.close()
-    return render_template_string(HOME_HTML, shops=shops, css=BASE_CSS)
+    shops = get_all_shops()
+    return render_template_string(HOME_HTML, shops=shops)
 
 @app.route("/pricing")
 def pricing():
@@ -1364,6 +1765,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
