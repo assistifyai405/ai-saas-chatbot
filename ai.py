@@ -27,7 +27,7 @@ except Exception:
 # =========================
 # CONFIG
 # =========================
-APP_VERSION = "v20.0"
+APP_VERSION = "v21.0"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
@@ -130,6 +130,7 @@ if ALLOWED_ORIGINS == ["*"]:
             r"/dashboard/*": {"origins": "*"},
             r"/invite/*": {"origins": "*"},
             r"/reset-password/*": {"origins": "*"},
+            r"/admin/*": {"origins": "*"},
         },
         supports_credentials=False
     )
@@ -312,19 +313,9 @@ def init_db():
         )
         """)
 
-        ensure_column(conn, "tenants", "plan_name", "TEXT NOT NULL DEFAULT 'starter'")
-        ensure_column(conn, "tenants", "subscription_status", "TEXT NOT NULL DEFAULT 'active'")
-        ensure_column(conn, "tenants", "monthly_message_limit", "INTEGER NOT NULL DEFAULT 500")
-        ensure_column(conn, "tenants", "stripe_customer_id", "TEXT DEFAULT ''")
-        ensure_column(conn, "tenants", "stripe_subscription_id", "TEXT DEFAULT ''")
-        ensure_column(conn, "tenants", "billing_email", "TEXT DEFAULT ''")
-        ensure_column(conn, "tenants", "billing_cycle", "TEXT DEFAULT 'monthly'")
-        ensure_column(conn, "tenants", "widget_color", "TEXT NOT NULL DEFAULT '#111111'")
-
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer_id ON tenants(stripe_customer_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_stripe_subscription_id ON tenants(stripe_subscription_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_customer_users_tenant_id ON customer_users(tenant_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_customer_users_email ON customer_users(email)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_tenant_id ON messages(tenant_id)")
@@ -590,7 +581,7 @@ Als jij dit niet was, kun je dit bericht negeren.
 
 
 def create_audit_log(
-    tenant_id: str | None,
+    tenant_id,
     actor_type: str,
     actor_id: str,
     action: str,
@@ -624,7 +615,7 @@ def create_audit_log(
         conn.commit()
 
 
-def list_audit_logs(tenant_id: str | None = None, limit: int = 100):
+def list_audit_logs(tenant_id=None, limit: int = 100):
     safe_limit = max(1, min(int(limit), 500))
     with closing(get_db()) as conn:
         if tenant_id:
@@ -1012,7 +1003,7 @@ def create_public_signup_checkout(email: str, plan_name: str):
     price_mapping = {
         "starter": STRIPE_PRICE_STARTER_MONTHLY,
         "pro": STRIPE_PRICE_PRO_MONTHLY,
-        "enterprise": STRIPE_PRICE_ENTERPRISE_MONTHLY,
+        "agency": STRIPE_PRICE_AGENCY_MONTHLY,
     }
     price_id = price_mapping.get(plan, "")
     if not price_id:
@@ -1034,7 +1025,7 @@ def create_public_signup_checkout(email: str, plan_name: str):
 
 
 def get_plan_limit(plan_name: str) -> int:
-    mapping = {"starter": 500, "pro": 5000, "enterprise": 50000}
+    mapping = {"starter": 500, "pro": 5000, "agency": 50000}
     return mapping.get((plan_name or "").strip().lower(), 500)
 
 
@@ -1147,6 +1138,40 @@ def get_all_tenants():
     return [dict(row) for row in rows]
 
 
+def get_tenant_leads(tenant_id: str, query: str = ""):
+    q = f"%{query.strip().lower()}%"
+    with closing(get_db()) as conn:
+        if query.strip():
+            rows = conn.execute(
+                """
+                SELECT id, tenant_id, name, email, phone, message, source, created_at
+                FROM leads
+                WHERE tenant_id = ?
+                  AND (
+                    LOWER(name) LIKE ?
+                    OR LOWER(email) LIKE ?
+                    OR LOWER(COALESCE(phone, '')) LIKE ?
+                    OR LOWER(message) LIKE ?
+                  )
+                ORDER BY created_at DESC
+                LIMIT 500
+                """,
+                (tenant_id, q, q, q, q)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, tenant_id, name, email, phone, message, source, created_at
+                FROM leads
+                WHERE tenant_id = ?
+                ORDER BY created_at DESC
+                LIMIT 500
+                """,
+                (tenant_id,)
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def update_tenant_settings(tenant_id: str, data: dict):
     tenant = get_tenant_by_id(tenant_id)
     if not tenant:
@@ -1195,7 +1220,7 @@ def customer_forbidden():
     return jsonify({"ok": False, "error": "Niet geautoriseerd."}), 401
 
 # =========================
-# HTML
+# HTML HELPERS
 # =========================
 def render_simple_page(title: str, body: str) -> str:
     return f"""<!DOCTYPE html>
@@ -1211,7 +1236,7 @@ body {{ margin:0; font-family:Arial,sans-serif; background:#0f172a; color:#fff; 
 input, textarea, button {{ width:100%; padding:12px; border-radius:10px; border:1px solid #374151; background:#0b1220; color:#fff; margin-bottom:12px; }}
 button {{ background:#2563eb; border:none; font-weight:700; cursor:pointer; }}
 button.secondary {{ background:#374151; }}
-pre {{ background:#020617; padding:12px; border-radius:12px; white-space:pre-wrap; word-break:break-word; }}
+pre {{ background:#020617; padding:12px; border-radius:12px; white-space:pre-wrap; word-break:break-word; overflow:auto; }}
 .grid {{ display:grid; gap:16px; }}
 .grid-2 {{ grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }}
 .grid-4 {{ grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }}
@@ -1219,9 +1244,75 @@ pre {{ background:#020617; padding:12px; border-radius:12px; white-space:pre-wra
 .stats {{ font-size:24px; font-weight:800; }}
 table {{ width:100%; border-collapse:collapse; }}
 th, td {{ padding:10px; text-align:left; border-bottom:1px solid #1f2937; vertical-align:top; }}
+a {{ color:#60a5fa; }}
 </style>
 </head>
 <body><div class="wrap">{body}</div></body></html>"""
+
+
+def render_homepage_html():
+    return render_simple_page(
+        "Assistify AI",
+        """
+<div class="card">
+  <h1 style="font-size:48px;margin-bottom:12px;">Assistify AI</h1>
+  <p class="muted" style="font-size:20px;max-width:760px;">
+    AI klantenservice software voor bedrijven. Laat bezoekers automatisch antwoorden krijgen,
+    leads achterlaten en snel doorgestuurd worden naar jouw team.
+  </p>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px;">
+    <button onclick="window.location.href='/signup'" style="width:auto;padding:14px 22px;">Start nu</button>
+    <button class="secondary" onclick="window.location.href='/dashboard/login'" style="width:auto;padding:14px 22px;">Klant login</button>
+    <button class="secondary" onclick="window.location.href='/admin'" style="width:auto;padding:14px 22px;">Admin</button>
+  </div>
+</div>
+
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));">
+  <div class="card">
+    <h2>Automatische antwoorden</h2>
+    <p class="muted">Beantwoord klantvragen direct via je eigen AI-widget op je website.</p>
+  </div>
+  <div class="card">
+    <h2>Leads verzamelen</h2>
+    <p class="muted">Laat bezoekers eenvoudig hun gegevens achterlaten in je widget.</p>
+  </div>
+  <div class="card">
+    <h2>Eigen dashboard</h2>
+    <p class="muted">Beheer je widget, teamleden, billing en instellingen vanuit één plek.</p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Pakketten</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Pakket</th>
+        <th>Geschikt voor</th>
+        <th>Berichten / maand</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Starter</td>
+        <td>Kleine bedrijven</td>
+        <td>500</td>
+      </tr>
+      <tr>
+        <td>Pro</td>
+        <td>Groeiende teams</td>
+        <td>5.000</td>
+      </tr>
+      <tr>
+        <td>Agency</td>
+        <td>Agencies en meerdere klanten</td>
+        <td>50.000</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+"""
+    )
 
 
 def render_admin_html():
@@ -1306,7 +1397,7 @@ def render_signup_html():
     <button onclick="startSignup('starter')">Starter</button>
     <button onclick="startSignup('pro')">Pro</button>
   </div>
-  <button onclick="startSignup('enterprise')">Enterprise</button>
+  <button onclick="startSignup('agency')">Agency</button>
   <p id="status" class="muted"></p>
 </div>
 <script>
@@ -1362,7 +1453,7 @@ def render_signup_cancel_html():
     return render_simple_page("Betaling geannuleerd", """
 <div class="card">
   <h1>Betaling geannuleerd</h1>
-  <p>Je kunt het opnieuw proberen via <a href="/signup" style="color:#60a5fa;">/signup</a>.</p>
+  <p>Je kunt het opnieuw proberen via <a href="/signup">/signup</a>.</p>
 </div>
 """)
 
@@ -1422,7 +1513,7 @@ async function saveSetup() {{
     if (!res.ok) throw new Error(data.error || "Er ging iets mis.");
     api_key.textContent = data.tenant.api_key || "";
     embed.textContent = data.embed_code || "";
-    status.innerHTML = 'Opgeslagen. Login via <a href="/dashboard/login" style="color:#60a5fa;">/dashboard/login</a>';
+    status.innerHTML = 'Opgeslagen. Login via <a href="/dashboard/login">/dashboard/login</a>';
   }} catch(e) {{
     status.textContent = e.message;
   }}
@@ -1527,12 +1618,20 @@ def render_dashboard_html():
   </div>
 </div>
 
-<div class="card">
-  <h2>Audit logs</h2>
-  <table>
-    <thead><tr><th>Tijd</th><th>Actie</th><th>Target</th><th>Meta</th></tr></thead>
-    <tbody id="auditTable"></tbody>
-  </table>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Leads</h2>
+    <button class="secondary" onclick="loadLeads()">Leads verversen</button>
+    <div id="leadsBox"></div>
+  </div>
+
+  <div class="card">
+    <h2>Audit logs</h2>
+    <table>
+      <thead><tr><th>Tijd</th><th>Actie</th><th>Target</th><th>Meta</th></tr></thead>
+      <tbody id="auditTable"></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -1585,6 +1684,26 @@ async function loadDashboard() {
       <td><pre>${JSON.stringify(JSON.parse(x.meta_json || "{}"), null, 2)}</pre></td>
     </tr>
   `).join("");
+
+  await loadLeads();
+}
+
+async function loadLeads() {
+  try {
+    const data = await api("/dashboard/leads");
+    leadsBox.innerHTML = (data.leads || []).length
+      ? data.leads.map(l => `
+        <div class="card">
+          <strong>${l.name}</strong> <span class="muted">(${l.email})</span><br>
+          <span class="muted">${l.phone || "-"}</span><br>
+          <span class="muted">${formatDate(l.created_at)} • ${l.source}</span>
+          <div style="margin-top:8px;">${l.message}</div>
+        </div>
+      `).join("")
+      : "<p class='muted'>Nog geen leads.</p>";
+  } catch (e) {
+    leadsBox.innerHTML = "<p class='muted'>" + e.message + "</p>";
+  }
 }
 
 async function saveSettings() {
@@ -1674,7 +1793,7 @@ async function acceptInvite() {{
     }});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Er ging iets mis.");
-    status.innerHTML = 'Account aangemaakt. Login via <a href="/dashboard/login" style="color:#60a5fa;">/dashboard/login</a>';
+    status.innerHTML = 'Account aangemaakt. Login via <a href="/dashboard/login">/dashboard/login</a>';
   }} catch(e) {{
     status.textContent = e.message;
   }}
@@ -1735,7 +1854,7 @@ async function saveNewPassword() {{
     }});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Er ging iets mis.");
-    status.innerHTML = 'Wachtwoord opgeslagen. Login via <a href="/dashboard/login" style="color:#60a5fa;">/dashboard/login</a>';
+    status.innerHTML = 'Wachtwoord opgeslagen. Login via <a href="/dashboard/login">/dashboard/login</a>';
   }} catch(e) {{
     status.textContent = e.message;
   }}
@@ -1765,7 +1884,8 @@ def add_security_headers(response):
 # =========================
 @app.route("/", methods=["GET"])
 def home():
-    return redirect("/signup")
+    return Response(render_homepage_html(), mimetype="text/html")
+
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -1844,7 +1964,7 @@ def signup_create_checkout():
     data = json_body()
     email = clamp_text(data.get("email") or "", 200)
     plan_name = clamp_text(data.get("plan_name") or "starter", 50).lower()
-    if plan_name not in ("starter", "pro", "enterprise"):
+    if plan_name not in ("starter", "pro", "agency"):
         return jsonify({"ok": False, "error": "Ongeldig plan."}), 400
     try:
         session_obj = create_public_signup_checkout(email, plan_name)
@@ -2090,7 +2210,7 @@ def reset_password_submit(token):
     return jsonify({"ok": True})
 
 # =========================
-# WIDGET ROUTES
+# WIDGET
 # =========================
 @app.route("/widget.js", methods=["GET"])
 def widget_js():
@@ -2605,6 +2725,14 @@ def dashboard_audit_logs():
     limit = request.args.get("limit", 100)
     return jsonify({"ok": True, "logs": list_audit_logs(session["customer_tenant_id"], limit=limit)})
 
+
+@app.route("/dashboard/leads", methods=["GET"])
+def dashboard_leads():
+    if not require_customer():
+        return customer_forbidden()
+    query = (request.args.get("q") or "").strip()
+    return jsonify({"ok": True, "leads": get_tenant_leads(session["customer_tenant_id"], query)})
+
 # =========================
 # ADMIN ROUTES
 # =========================
@@ -2638,6 +2766,3 @@ ensure_startup()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=False)
-
-
-
