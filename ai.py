@@ -29,7 +29,7 @@ except Exception:
 # =========================
 # CONFIG
 # =========================
-APP_VERSION = "v22.0"
+APP_VERSION = "v23.0"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
@@ -57,6 +57,7 @@ MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", "4000"))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "700"))
 MAX_ASSISTANT_REPLY_CHARS = int(os.getenv("MAX_ASSISTANT_REPLY_CHARS", "5000"))
+TOKEN_TTL_HOURS = int(os.getenv("TOKEN_TTL_HOURS", "72"))
 
 DEFAULT_COMPANY_NAME = os.getenv("COMPANY_NAME", "Assistify AI").strip()
 DEFAULT_COMPANY_TONE = os.getenv(
@@ -607,6 +608,14 @@ def make_csv_response(filename: str, rows: list, fieldnames: list) -> Response:
     )
 
 
+def token_is_expired(created_at: int) -> bool:
+    try:
+        age = now_ts() - int(created_at or 0)
+        return age > (TOKEN_TTL_HOURS * 3600)
+    except Exception:
+        return True
+
+
 def get_tenant_by_api_key(api_key: str):
     with closing(get_db()) as conn:
         row = conn.execute("SELECT * FROM tenants WHERE api_key = ? AND is_active = 1", (api_key,)).fetchone()
@@ -897,13 +906,18 @@ def build_openai_input(tenant_id: str, session_id: str, user_message: str):
             rows = conn.execute(
                 """
                 SELECT role, content
-                FROM messages
-                WHERE tenant_id = ? AND session_id = ?
+                FROM (
+                    SELECT role, content, created_at, rowid
+                    FROM messages
+                    WHERE tenant_id = ? AND session_id = ?
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT ?
+                )
                 ORDER BY created_at ASC, rowid ASC
-                LIMIT ?
                 """,
                 (tenant_id, session_id, MAX_HISTORY_MESSAGES)
             ).fetchall()
+
         for row in rows:
             role = row["role"] if row["role"] in ("user", "assistant", "system", "developer") else "user"
             content = (row["content"] or "").strip()
@@ -1292,6 +1306,7 @@ input, textarea, select, button {{
   color:#fff;
   font-size:15px;
   outline:none;
+  margin-bottom:10px;
 }}
 input:focus, textarea:focus, select:focus {{
   border-color:rgba(139,124,255,.72);
@@ -1790,6 +1805,23 @@ def render_dashboard_html():
 <script>
 let tenant = null;
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function safeJsonPretty(value) {
+  try {
+    return JSON.stringify(JSON.parse(value || "{}"), null, 2);
+  } catch {
+    return "{}";
+  }
+}
+
 async function api(path, options={}) {
   const headers = options.headers || {};
   if (!headers["Content-Type"] && !(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
@@ -1824,15 +1856,15 @@ async function loadDashboard() {
   embedBox.textContent = me.embed_code || "";
 
   teamTable.innerHTML = (teamData.users || []).map(u => `
-    <tr><td>${u.full_name || "-"}</td><td>${u.email}</td><td>${u.is_owner ? "Ja" : "Nee"}</td><td>${u.is_active ? "Ja" : "Nee"}</td></tr>
+    <tr><td>${escapeHtml(u.full_name || "-")}</td><td>${escapeHtml(u.email)}</td><td>${u.is_owner ? "Ja" : "Nee"}</td><td>${u.is_active ? "Ja" : "Nee"}</td></tr>
   `).join("");
 
   auditTable.innerHTML = (auditData.logs || []).map(x => `
     <tr>
-      <td>${formatDate(x.created_at)}</td>
-      <td>${x.action}</td>
-      <td>${x.target_type}:${x.target_id || "-"}</td>
-      <td><pre>${JSON.stringify(JSON.parse(x.meta_json || "{}"), null, 2)}</pre></td>
+      <td>${escapeHtml(formatDate(x.created_at))}</td>
+      <td>${escapeHtml(x.action)}</td>
+      <td>${escapeHtml((x.target_type || "") + ":" + (x.target_id || "-"))}</td>
+      <td><pre>${escapeHtml(safeJsonPretty(x.meta_json))}</pre></td>
     </tr>
   `).join("");
 
@@ -1846,15 +1878,15 @@ async function loadLeads() {
     leadsBox.innerHTML = (data.leads || []).length
       ? data.leads.map(l => `
         <div class="list-card">
-          <strong>${l.name}</strong> <span class="muted">(${l.email})</span><br>
-          <span class="muted">${l.phone || "-"}</span><br>
-          <span class="muted">${formatDate(l.created_at)} • ${l.source}</span>
-          <div style="margin-top:8px;">${l.message}</div>
+          <strong>${escapeHtml(l.name)}</strong> <span class="muted">(${escapeHtml(l.email)})</span><br>
+          <span class="muted">${escapeHtml(l.phone || "-")}</span><br>
+          <span class="muted">${escapeHtml(formatDate(l.created_at))} • ${escapeHtml(l.source)}</span>
+          <div style="margin-top:8px;">${escapeHtml(l.message)}</div>
         </div>
       `).join("")
       : "<p class='muted'>Nog geen leads gevonden.</p>";
   } catch (e) {
-    leadsBox.innerHTML = "<p class='muted'>" + e.message + "</p>";
+    leadsBox.innerHTML = "<p class='muted'>" + escapeHtml(e.message) + "</p>";
   }
 }
 
@@ -2208,6 +2240,10 @@ def invite_accept_page(token):
     row = get_invite_token_row(token)
     if not row:
         return Response("Invite niet gevonden.", status=404)
+    if int(row.get("is_used", 0)) == 1:
+        return Response("Invite is al gebruikt.", status=400)
+    if token_is_expired(row.get("created_at", 0)):
+        return Response("Invite is verlopen.", status=400)
     return Response(render_invite_accept_html(token, row), mimetype="text/html")
 
 
@@ -2221,6 +2257,10 @@ def reset_password_page(token):
     row = get_password_reset_token_row(token)
     if not row:
         return Response("Reset token niet gevonden.", status=404)
+    if int(row.get("is_used", 0)) == 1:
+        return Response("Reset token is al gebruikt.", status=400)
+    if token_is_expired(row.get("created_at", 0)):
+        return Response("Reset token is verlopen.", status=400)
     return Response(render_reset_password_html(token), mimetype="text/html")
 
 # =========================
@@ -2286,6 +2326,10 @@ def signup_complete_view(token):
     row = get_onboarding_token_row(token)
     if not row:
         return Response("Onboarding token niet gevonden.", status=404)
+    if int(row.get("is_used", 0)) == 1:
+        return Response("Onboarding token is al gebruikt.", status=400)
+    if token_is_expired(row.get("created_at", 0)):
+        return Response("Onboarding token is verlopen.", status=400)
     tenant = get_tenant_by_id(row["tenant_id"])
     if not tenant:
         return Response("Tenant niet gevonden.", status=404)
@@ -2297,6 +2341,10 @@ def signup_complete_save(token):
     row = get_onboarding_token_row(token)
     if not row:
         return jsonify({"ok": False, "error": "Onboarding token niet gevonden."}), 404
+    if int(row.get("is_used", 0)) == 1:
+        return jsonify({"ok": False, "error": "Onboarding token is al gebruikt."}), 400
+    if token_is_expired(row.get("created_at", 0)):
+        return jsonify({"ok": False, "error": "Onboarding token is verlopen."}), 400
 
     tenant = get_tenant_by_id(row["tenant_id"])
     if not tenant:
@@ -2388,6 +2436,8 @@ def invite_accept_submit(token):
         return jsonify({"ok": False, "error": "Invite niet gevonden."}), 404
     if int(row.get("is_used", 0)) == 1:
         return jsonify({"ok": False, "error": "Invite is al gebruikt."}), 400
+    if token_is_expired(row.get("created_at", 0)):
+        return jsonify({"ok": False, "error": "Invite is verlopen."}), 400
 
     data = json_body()
     email = clamp_text(data.get("email") or row["email"], 200).lower()
@@ -2459,6 +2509,8 @@ def reset_password_submit(token):
         return jsonify({"ok": False, "error": "Reset token niet gevonden."}), 404
     if int(row.get("is_used", 0)) == 1:
         return jsonify({"ok": False, "error": "Reset token is al gebruikt."}), 400
+    if token_is_expired(row.get("created_at", 0)):
+        return jsonify({"ok": False, "error": "Reset token is verlopen."}), 400
 
     data = json_body()
     password = (data.get("password") or "").strip()
@@ -2484,13 +2536,29 @@ def reset_password_submit(token):
 def widget_js():
     js = r"""
 (function () {
+  var initialScript = document.currentScript;
+
+  function resolveScriptElement() {
+    if (initialScript) return initialScript;
+    var scripts = document.querySelectorAll('script[src]');
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      var src = scripts[i].getAttribute("src") || "";
+      if (src.indexOf("/widget.js") !== -1 || src.indexOf("widget.js") !== -1) {
+        return scripts[i];
+      }
+    }
+    return null;
+  }
+
   function bootWidget() {
-    var currentScript = document.currentScript;
+    var currentScript = resolveScriptElement();
     var tenantKey = currentScript ? currentScript.getAttribute("data-tenant-key") : "";
     var apiBase = currentScript ? currentScript.getAttribute("data-api-base") : "";
     var title = currentScript ? currentScript.getAttribute("data-title") : "Chat";
     var accent = currentScript ? currentScript.getAttribute("data-color") : "#6d5efc";
     if (!tenantKey || !apiBase) return;
+
+    if (document.getElementById("assistify-launcher")) return;
 
     var sessionId = localStorage.getItem("assistify_session_id");
     if (!sessionId) {
@@ -2611,6 +2679,7 @@ def widget_js():
     input.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
     addMessage("Hoi! Waar kan ik je mee helpen?", "assistant");
   }
+
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootWidget);
   else bootWidget();
 })();
