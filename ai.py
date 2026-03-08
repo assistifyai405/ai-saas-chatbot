@@ -463,14 +463,13 @@ input, textarea, select { width:100%; padding:12px; margin:8px 0 14px 0; border:
 @media (max-width: 900px) { .grid2, .grid3 { grid-template-columns:1fr; } }
 """
 
-HOME_HTML = """
-<style>
+HOME_HTML = <style>
 
 body{
 margin:0;
-font-family:Arial, Helvetica, sans-serif;
-background:#f3f4f6;
-color:#111827;
+font-family:Inter,Arial,Helvetica,sans-serif;
+background:#f9fafb;
+color:#111;
 }
 
 .container{
@@ -480,51 +479,79 @@ padding:40px 20px;
 }
 
 .hero{
+padding:120px 20px;
+text-align:center;
 background:white;
-padding:60px;
-border-radius:20px;
-box-shadow:0 10px 30px rgba(0,0,0,0.08);
-margin-bottom:40px;
+border-bottom:1px solid #eee;
 }
 
 .hero h1{
-font-size:48px;
-margin-bottom:10px;
+font-size:56px;
+margin-bottom:20px;
 }
 
 .hero p{
-font-size:18px;
+font-size:20px;
 color:#6b7280;
+max-width:700px;
+margin:auto;
 }
 
-.buttons{
-margin-top:25px;
+.cta{
+margin-top:40px;
 }
 
 .btn{
-display:inline-block;
-padding:14px 26px;
-background:#111827;
-color:white;
+padding:16px 30px;
 border-radius:12px;
 text-decoration:none;
 font-weight:bold;
-margin-right:10px;
+margin:10px;
+display:inline-block;
 }
 
-.btn.secondary{
+.btn-primary{
 background:#6366f1;
+color:white;
 }
 
-.section{
+.btn-dark{
+background:#111827;
+color:white;
+}
+
+.features{
+padding:80px 20px;
+background:#f3f4f6;
+}
+
+.feature-grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+gap:30px;
+max-width:1100px;
+margin:auto;
+}
+
+.feature{
 background:white;
-padding:40px;
-border-radius:20px;
-box-shadow:0 10px 30px rgba(0,0,0,0.06);
+padding:30px;
+border-radius:16px;
+box-shadow:0 10px 25px rgba(0,0,0,0.05);
+}
+
+.feature h3{
+margin-top:10px;
+}
+
+.shops{
+padding:80px 20px;
+max-width:900px;
+margin:auto;
 }
 
 .shop{
-padding:14px 0;
+padding:15px 0;
 border-bottom:1px solid #eee;
 }
 
@@ -532,28 +559,21 @@ border-bottom:1px solid #eee;
 
 
 
-<div class="container">
-
 <div class="hero">
 
-<div style="display:flex;align-items:center;gap:14px">
-<img src="https://cdn-icons-png.flaticon.com/512/4712/4712109.png" width="45">
 <h1>Assistify AI</h1>
-</div>
 
-<p>AI klantenservice chatbot voor websites</p>
+<p>AI klantenservice chatbot voor websites. Automatiseer support, genereer leads en verkoop meer met AI.</p>
 
-<p>Automatische klantenservice • Stripe abonnementen • Dashboard • AI chatbot widget</p>
+<div class="cta">
 
-<div class="buttons">
+<a class="btn btn-primary" href="/shop/demo-shop">
+Bekijk demo
+</a>
 
-<a class="btn" href="/shop/demo-shop">Open Demo Shop</a>
-
-<a class="btn secondary" href="/pricing">Bekijk prijzen</a>
-
-<a class="btn" href="/admin/login">Admin login</a>
-
-<a class="btn" href="/client/login">Client login</a>
+<a class="btn btn-dark" href="/pricing">
+Bekijk prijzen
+</a>
 
 </div>
 
@@ -561,7 +581,37 @@ border-bottom:1px solid #eee;
 
 
 
-<div class="section">
+<div class="features">
+
+<div class="feature-grid">
+
+<div class="feature">
+<h3>AI Chatbot</h3>
+<p>Automatische klantenservice die vragen van bezoekers direct beantwoordt.</p>
+</div>
+
+<div class="feature">
+<h3>Lead generatie</h3>
+<p>De AI verzamelt automatisch leads uit gesprekken met bezoekers.</p>
+</div>
+
+<div class="feature">
+<h3>Stripe abonnementen</h3>
+<p>Verkoop abonnementen via Stripe met automatische onboarding.</p>
+</div>
+
+<div class="feature">
+<h3>Website training</h3>
+<p>Train de AI op elke website zodat hij vragen correct kan beantwoorden.</p>
+</div>
+
+</div>
+
+</div>
+
+
+
+<div class="shops">
 
 <h2>Actieve shops</h2>
 
@@ -569,7 +619,9 @@ border-bottom:1px solid #eee;
 
 <div class="shop">
 
-<strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }} <br>
+<strong>{{ shop["name"] }}</strong> — /shop/{{ shop["slug"] }}
+
+<br>
 
 <a href="/shop/{{ shop['slug'] }}">Open shop</a>
 
@@ -578,9 +630,6 @@ border-bottom:1px solid #eee;
 {% endfor %}
 
 </div>
-
-</div>
-LOGIN_HTML = """
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -1446,6 +1495,7 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
 
 
 
