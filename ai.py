@@ -469,10 +469,8 @@ HOME_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI SaaS v15</title>
-<style>{{ css }}</style>
-</head>
-<body>
+<h1>Assistify AI</h1>
+<p>AI klantenservice voor websites</p>
 <div class="wrap">
     <div class="card">
         <h1>AI SaaS v15</h1>
@@ -1333,3 +1331,4 @@ if __name__ == "__main__":
     init_db()
 
     app.run(debug=True, host="0.0.0.0", port=PORT)
+
