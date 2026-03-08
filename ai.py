@@ -102,7 +102,7 @@ STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL", "").strip()
 STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL", "").strip()
 STRIPE_PRICE_STARTER_MONTHLY = os.getenv("STRIPE_PRICE_STARTER_MONTHLY", "").strip()
 STRIPE_PRICE_PRO_MONTHLY = os.getenv("STRIPE_PRICE_PRO_MONTHLY", "").strip()
-STRIPE_PRICE_ENTERPRISE_MONTHLY = os.getenv("STRIPE_PRICE_ENTERPRISE_MONTHLY", "").strip()
+STRIPE_PRICE_AGENCY_MONTHLY = os.getenv("STRIPE_PRICE_AGENCY_MONTHLY", "").strip()
 
 if stripe and STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
@@ -2638,5 +2638,6 @@ ensure_startup()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=False)
+
 
 
